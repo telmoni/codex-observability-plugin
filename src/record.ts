@@ -149,7 +149,9 @@ export function recordOf(turn: Turn, context: Context, ending?: Ending): RunReco
     runId: runIdOf(context.sessionId, turn.id),
     agent: AGENT,
     sessionId: context.sessionId,
-    start,
+    // A clock set back mid-turn writes a call before the turn's own opening:
+    // the run still holds every call, from its first start to its last end.
+    start: inside.reduce((earliest, item) => Math.min(earliest, Number(item.start)), start),
     end: inside.reduce((latest, item) => Math.max(latest, Number(item.end)), until),
     inside,
   };

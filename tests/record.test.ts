@@ -1,3 +1,4 @@
+import { Telmoni } from 'telmoni';
 import type { ModelCallRecord, RunRecord, ToolCallRecord } from 'telmoni';
 import { describe, expect, it } from 'vitest';
 
@@ -293,6 +294,43 @@ describe('a response’s tokens', () => {
       ['gpt-5.5-codex', 100],
       ['gpt-5.5-codex', 50],
     ]);
+  });
+});
+
+describe('a turn whose clock was set back while it ran', () => {
+  it('is a run that holds every call, none ending before it starts, as the SDK takes it', async () => {
+    const meta: Meta = { threadId: 't', sessionId: 't', created: at(0), derived: false, ownFrom: undefined, provider: 'openai' };
+    let place = 0;
+    const line = (ms: number, event: Event): Line => ({ start: place, end: ++place, time: at(1) + ms, ordinal: undefined, event });
+    const turns = new Turns(meta, new Set(), undefined, { offset: 0, countKey: undefined, model: 'gpt-5.5-codex' });
+    const [turn] = [
+      line(100, { kind: 'start', turnId: 'turn' }),
+      line(105, { kind: 'output' }),
+      line(95, { kind: 'call', callId: 'c1', name: 'exec_command', inPlace: false, outcome: undefined }),
+      line(90, { kind: 'usage', turnId: 'turn', responseId: 'r1', usage: { input: 10, cached: 0, cacheWrite: 0, output: 1 } }),
+      line(96, { kind: 'result', callId: 'c1' }),
+      // Codex's own record of the command, its end before its start.
+      line(97, { kind: 'done', callId: 'c1', name: undefined, outcome: undefined, startMs: at(1) + 300, endMs: at(1) + 200, durationMs: undefined }),
+      line(80, { kind: 'output' }),
+      line(85, { kind: 'complete', turnId: 'turn', errorType: undefined }),
+    ].flatMap((each) => turns.push(each));
+    const run = recordOf(turn!, { sessionId: 's', provider: 'openai', model: undefined })!;
+    for (const item of run.inside ?? []) {
+      expect(Number(item.end)).toBeGreaterThanOrEqual(Number(item.start));
+      expect(Number(item.start)).toBeGreaterThanOrEqual(Number(run.start));
+      expect(Number(item.end)).toBeLessThanOrEqual(Number(run.end));
+    }
+    expect([Number(run.start), Number(run.end)]).toEqual([at(1) + 80, at(1) + 300]);
+    // The SDK refuses a record with any span ending before it starts; this one it queues.
+    const telmoni = new Telmoni(
+      { endpoint: 'http://127.0.0.1:9', apiKey: 'telmoni_test' },
+      { transport: () => Promise.resolve({ status: 200, headers: { get: () => null }, text: () => Promise.resolve('{}') }) },
+    );
+    try {
+      expect(() => telmoni.recordRun(run)).not.toThrow();
+    } finally {
+      await telmoni.shutdown();
+    }
   });
 });
 
