@@ -47,9 +47,9 @@ Each turn — from your prompt to Codex's last reply, or to your interruption �
 - each response of the model, a model call with its model and its token counts, the cache's among them;
 - each tool call — a command, a patch, an MCP tool, a web search — by its name, with its time, failed where Codex says it failed, and cancelled where you declined it or the turn ended first.
 
-A subagent Codex starts runs turns of its own, each a run of the same session. An interrupted turn is a cancelled run, and a turn an error ended a failed one, named by the error's kind (`context_window_exceeded`). A command you run yourself with `!` is no run. In a session Codex keeps in its older, legacy history, a command's exit code is written only into the command's output, which the plugin never reads: there, a command that failed is recorded as run.
+A subagent Codex starts runs turns of its own, each a run of the same session. An interrupted turn is a cancelled run, and a turn an error ended a failed one, named by the error's kind (`context_window_exceeded`); Codex before 0.145 writes no error at a turn's end, so there such a turn is recorded as one that completed. A command you run yourself with `!` is no run. In a session Codex keeps in its older, legacy history, a command's exit code is written only into the command's output, which the plugin never reads: there, a command that failed is recorded as run. A name longer than Telmoni keeps — a tool's past 128 characters, a model's past 123 — is cut to fit, and a turn of more than 10,000 calls is recorded with its first 10,000.
 
-A turn is sent once it has ended. If Telmoni cannot be reached, the next turn's hook sends it, and a turn sent twice is stored once.
+A turn is sent once it has ended: when Codex closes it, which may be minutes after you see its answer while another plugin's hooks run or Codex compacts the session. If Telmoni cannot be reached, the next turn's hook sends it again, as the same bytes, which Telmoni stores once.
 
 ## When something is wrong
 
