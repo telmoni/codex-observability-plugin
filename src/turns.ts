@@ -63,9 +63,8 @@ export interface Turn {
   model: string | undefined;
   responses: Response[];
   calls: Map<string, ToolCall>;
+  /** Its closing line, if it had one: closed by the next turn's opening instead, it has none. */
   closing: { at: number | undefined; aborted: boolean; reason: string | undefined; errorType: string | undefined } | undefined;
-  /** Closed by the next turn's opening rather than a closing of its own. */
-  superseded: boolean;
 }
 
 const V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -156,10 +155,7 @@ export class Turns {
     const current = this.#current;
     if (current?.turn.id === turnId) return [];
     const closed: Turn[] = [];
-    if (current !== undefined) {
-      current.turn.superseded = true;
-      if (current.own) closed.push(current.turn);
-    }
+    if (current?.own) closed.push(current.turn);
     const own = !this.#sent.has(turnId) && (turnId === this.#target || !this.#copied(turnId));
     this.#current = {
       own,
@@ -172,7 +168,6 @@ export class Turns {
         responses: [],
         calls: new Map(),
         closing: undefined,
-        superseded: false,
       },
     };
     this.#previous = line.time;

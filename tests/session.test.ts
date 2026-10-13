@@ -100,6 +100,51 @@ describe('a hook', () => {
     expect(sent[0]!.end).toBe(Date.parse(paginated[closing(paginated, A)]!.record['timestamp'] as string));
   });
 
+  it('waits on for the stopped turn’s closing line while the turn goes on, as when another plugin’s Stop hook kept it at work', async () => {
+    const path = writtenThrough(closing(paginated, A));
+    // The work a Stop hook that blocked asked for: calls of the same turn, before its closing line.
+    const more = (i: number): string => {
+      const at = (ms: number): string => new Date(Date.parse('2026-10-12T09:00:09.900Z') + i * 20 + ms).toISOString();
+      return [
+        { timestamp: at(0), type: 'response_item', payload: { type: 'function_call', name: 'exec_command', arguments: '{}', call_id: `call_more_${i}` } },
+        { timestamp: at(5), type: 'token_usage_record', payload: { turn_id: A, response_id: `resp_more_${i}`, usage: { input_tokens: 100, cached_input_tokens: 0, output_tokens: 10, reasoning_output_tokens: 0, total_tokens: 110 } } },
+        { timestamp: at(10), type: 'response_item', payload: { type: 'function_call_output', call_id: `call_more_${i}`, output: 'FAKE' } },
+      ]
+        .map((line) => `${JSON.stringify(line)}\n`)
+        .join('');
+    };
+    const waiting = hook('Stop', path, A, { closeWaitMs: 400, pollMs: 20 });
+    for (let i = 0; i < 8; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      appendFileSync(path, more(i));
+    }
+    appendFileSync(path, `${paginated[closing(paginated, A)]!.text}\n`);
+    await waiting;
+    expect(sent.map((run) => run.runId)).toEqual(runIds(A));
+    const tools = (sent[0]!.inside ?? []).flatMap((item) => (item.type === 'tool_call' ? [item.name] : []));
+    expect(tools).toEqual(['exec_command', 'apply_patch', 'mcp__docs__search', 'web_search', ...Array<string>(8).fill('exec_command')]);
+    expect(sent[0]!.end).toBe(Date.parse(paginated[closing(paginated, A)]!.record['timestamp'] as string));
+  });
+
+  it('gives up waiting once the named turn has been quiet for the wait, however busy the thread', async () => {
+    const path = writtenThrough(opening(paginated, B) + 1);
+    const began = Date.now();
+    const waiting = hook('Stop', path, '01a12f99-0000-7000-8000-000000000000', { closeWaitMs: 300, pollMs: 20 });
+    // Turn B's own lines keep coming, a turn the hook did not name.
+    let next = opening(paginated, B) + 1;
+    let done = false;
+    void waiting.then(() => (done = true));
+    while (!done && next < closing(paginated, B)) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      appendFileSync(path, `${paginated[next++]!.text}\n`);
+    }
+    await waiting;
+    expect(Date.now() - began).toBeLessThan(3_000);
+    expect(next).toBeLessThan(closing(paginated, B));
+    expect(sent.map((run) => run.runId)).toEqual(runIds(A));
+    expect(logged).toEqual(['the turn this hook named is not in its rollout; nothing of it sent']);
+  });
+
   it('sweeps a turn that was interrupted and one an error ended at the next Stop', async () => {
     const path = writtenThrough(closing(paginated, A) + 1);
     await hook('Stop', path, A);
@@ -150,6 +195,28 @@ describe('a hook', () => {
       [runIdOf(SESSION, A), undefined],
       [runIdOf(SESSION, B), true],
     ]);
+  });
+
+  describe('a turn the next turn’s opening closed, Codex having died before its closing line', () => {
+    const G = `${F.slice(0, 24)}bbbbbbbbbbbb`;
+    const resumed = (): string => {
+      const path = writtenThrough(paginated.length);
+      appendFileSync(path, `${JSON.stringify({ timestamp: '2026-10-12T09:05:00.000Z', ordinal: 900, type: 'event_msg', payload: { type: 'task_started', turn_id: G } })}\n`);
+      return path;
+    };
+
+    it('is sent as done where a Stop hook named it, its work having ended', async () => {
+      await hook('Stop', resumed(), F);
+      expect(sent.map((run) => run.runId)).toEqual(runIds(A, B, C, E, F));
+      expect(sent.at(-1)!.cancelled).toBeUndefined();
+      expect(logged).toEqual([]);
+    });
+
+    it('is sent cut short where no hook named it', async () => {
+      await hook('Stop', resumed(), G);
+      expect(sent.map((run) => run.runId)).toEqual(runIds(A, B, C, E, F));
+      expect(sent.at(-1)!.cancelled).toBe(true);
+    });
   });
 
   it('stops at a turn the platform did not take, and sends it again at the next hook', async () => {

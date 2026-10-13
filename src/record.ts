@@ -59,8 +59,10 @@ function outcomeOf(turn: Turn, ending: Ending | undefined): RunOutcome {
     // replaced or a review ended, is cancelled.
     return closing.reason === 'budget_limited' ? { errorType: 'budget_limited' } : { cancelled: true };
   }
-  if (turn.superseded || ending !== 'stopped') return { cancelled: true };
-  return {};
+  // With no closing of its own, a turn a Stop hook named had done its work,
+  // whatever came after it; any other was cut short: interrupted, replaced
+  // by the next turn's opening, or left open as the session ended.
+  return ending === 'stopped' ? {} : { cancelled: true };
 }
 
 /**

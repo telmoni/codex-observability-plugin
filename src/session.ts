@@ -22,20 +22,23 @@ import { type Checkpoint, type Turn, Turns } from './turns.js';
 export interface Deps {
   sender: (destination: Destination) => { send(record: RunRecord): Promise<boolean>; close(): Promise<void> };
   log: (line: string) => void;
-  /** How long a stopped turn's closing line is waited for, and how often the rollout is looked at meanwhile. */
+  /** How long a stopped turn's closing line is waited for with no news of the turn, and how often the rollout is looked at meanwhile. */
   closeWaitMs?: number;
   pollMs?: number;
 }
 
-/** How long a hook waits for another of the same thread to finish. */
-const LOCK_WAIT_MS = 150_000;
 /**
  * Codex writes a stopped turn's closing line once every Stop hook has
- * returned, another plugin's slow one among them, and any compaction after
- * the turn is done.
+ * returned — another plugin's, which Codex gives ten minutes unless told
+ * otherwise — and any compaction after the turn is done; a Stop hook that
+ * keeps the turn going has it at work meanwhile, its lines still coming. So
+ * the line is waited for while the turn's lines come, and for ten minutes
+ * past the last.
  */
-const CLOSE_WAIT_MS = 60_000;
+const CLOSE_WAIT_MS = 10 * 60_000;
 const POLL_MS = 250;
+/** How long a hook waits for another of the same thread to finish: past a quiet wait for a closing line. */
+const LOCK_WAIT_MS = CLOSE_WAIT_MS + 2 * 60_000;
 /** How often the place reached is saved while turns are sent; a turn sent again after a crash is stored once. */
 const SAVE_EVERY_MS = 1_000;
 
@@ -142,29 +145,35 @@ async function readLocked(
     return true;
   };
   const target = input.turnId;
-  const deadline = Date.now() + (target === undefined ? 0 : (deps.closeWaitMs ?? CLOSE_WAIT_MS));
+  // What the hook says of the turn it names, whatever closes it in the rollout.
+  const named: Ending = input.event === 'Interrupt' ? 'interrupted' : 'stopped';
+  const quietMs = target === undefined ? 0 : (deps.closeWaitMs ?? CLOSE_WAIT_MS);
+  let news = Date.now();
   const reader = new Reader(path, from.offset);
   try {
     for (;;) {
       const lines = reader.read();
       if (lines === undefined) {
-        if (target === undefined || sent.has(target) || Date.now() >= deadline) break;
+        if (target === undefined || sent.has(target) || Date.now() - news >= quietMs) break;
         await sleep(deps.pollMs ?? POLL_MS);
         continue;
       }
       for (const line of lines) {
         for (const turn of turns.push(line)) {
-          if (!(await finish(turn))) return false;
+          if (!(await finish(turn, turn.id === target ? named : undefined))) return false;
           if (Date.now() - saved >= SAVE_EVERY_MS) save(turns.checkpoint());
         }
       }
+      // Only the named turn's own lines put off giving up on it: another
+      // turn's would have closed it, and a thread's other work is no news.
+      if (turns.open?.id === target) news = Date.now();
     }
     // The turn the hook named is final as it stands, its closing line
     // unwritten yet; at the session's end, so is whatever was left open.
     const open = turns.open;
     if (open !== undefined) {
       let ending: Ending | undefined;
-      if (open.id === target) ending = input.event === 'Interrupt' ? 'interrupted' : 'stopped';
+      if (open.id === target) ending = named;
       else if (input.event === 'SessionEnd') ending = 'session-ended';
       if (ending !== undefined) {
         if (!(await finish(open, ending))) return false;
