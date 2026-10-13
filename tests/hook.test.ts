@@ -178,6 +178,29 @@ describe('the hook', () => {
     expect(ingest.received).toEqual([]);
   }, 30_000);
 
+  it('exits 0 at its own deadline, printing nothing, where its stdin is never closed', async () => {
+    const started = Date.now();
+    const ran = await new Promise<Ran & { signal: NodeJS.Signals | null }>((resolve, reject) => {
+      const child = spawn(process.execPath, [HOOK], { stdio: ['pipe', 'pipe', 'pipe'], env: { PATH: process.env['PATH'] ?? '', HOME: home.path } });
+      let stdout = '';
+      let stderr = '';
+      child.stdout.on('data', (chunk: Buffer) => void (stdout += chunk.toString('utf8')));
+      child.stderr.on('data', (chunk: Buffer) => void (stderr += chunk.toString('utf8')));
+      const killer = setTimeout(() => child.kill('SIGKILL'), 15_000);
+      child.on('error', reject);
+      child.on('close', (code, signal) => {
+        clearTimeout(killer);
+        resolve({ code, signal, ms: Date.now() - started, stdout, stderr });
+      });
+      // Written, and never ended.
+      child.stdin.write('{"hook_event_name":"Stop"');
+    });
+    expect(ran).toMatchObject({ code: 0, signal: null, stdout: '', stderr: '' });
+    // Inside the ten seconds Codex gives a Stop hook.
+    expect(ran.ms).toBeLessThan(10_000);
+    expect(readFileSync(join(home.path, '.codex', 'telmoni', 'hook.log'), 'utf8')).toMatch(/failed: Error\n$/);
+  }, 20_000);
+
   it('logs input it does not understand, sends nothing, and still exits 0', async () => {
     const codex = join(home.path, '.codex');
     const ran = await runHook({ hook_event_name: 'Stop', session_id: '../../etc' }, {});

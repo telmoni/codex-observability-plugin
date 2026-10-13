@@ -27,7 +27,12 @@ function readStdin(): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
-    const timer = setTimeout(() => reject(new Error('no hook input')), INPUT_WAIT_MS);
+    const timer = setTimeout(() => {
+      // A stdin left open would hold the process, and the session with it,
+      // until Codex killed the hook at its timeout.
+      process.stdin.destroy();
+      reject(new Error('no hook input'));
+    }, INPUT_WAIT_MS);
     process.stdin.on('data', (chunk: Buffer) => {
       size += chunk.length;
       if (size > MAX_INPUT_BYTES) {
