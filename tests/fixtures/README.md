@@ -1,0 +1,11 @@
+# Fixtures
+
+Every rollout here is **synthetic**. Codex was not installed where the plugin was built, and no person's rollout was ever copied in: each was written from the record shapes in Codex's own source at `rust-v0.162.1` (`codex-rs/protocol`, `codex-rs/rollout`, `codex-rs/core`), the legacy one from the dialect Codex 0.143 writes. Where a real rollout keeps text — a prompt, a reply, a reasoning summary, a command, a call's arguments or output, a patch, a path, the working folder, an email — the text here is fake and marked `FAKE`, with a fake path (`/home/someone/FAKE-project`), a fake email (`someone@example.com`) and a fake command (`rm -rf …`) inside it, so a suite can show that none of it reaches a record or a request. Ids are version 7 UUIDs minted at the fixtures' own times, from 2026-10-12T09:00:00Z.
+
+| Rollout | What it holds |
+|---|---|
+| `paginated/` | Codex 0.162's paginated dialect, six turns: one completed whose command fails (its exit code), whose patch is declined and whose MCP tool fails, with a web search; one interrupted while its command ran; one an error ended (`context_window_exceeded`); a command the person ran with `!`; a `/compact`; and the turn a `Stop` hook names, its `task_complete` not yet written. A `token_usage_record` per response beside the running `token_count`s, one repeated by a rate-limit refresh and one an estimate after the compaction. |
+| `legacy/` | Codex 0.143's legacy dialect: no ordinals and no per-response records, the running total its only tokens, repeated by a rate-limit refresh and estimated after a compaction; a shell command whose exit code is only in its output's text, an MCP tool whose `mcp_tool_call_end` failed, a patch whose `patch_apply_end` failed, an interrupted turn and a completed one. |
+| `fork-legacy/` | A session forked from a legacy one while its turn ran: the source's first line and turns copied in, the boundary the fork writes for the source's open turn, then the fork's own turn. |
+| `subagent/` | A paginated subagent's rollout: its parent's history as it inherited it, numbered below `subagent_history_start_ordinal`, then its own turn. |
+| `fork-paginated/` | A paginated fork, its source's history left in the source (`history_base`): the boundary it writes for the source's open turn, whose opening is not here, then its own turn. |
