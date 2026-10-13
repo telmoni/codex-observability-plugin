@@ -13,7 +13,7 @@ import type { RunRecord } from 'telmoni';
 import type { HookInput } from './input.js';
 import { kindOf } from './log.js';
 import { type Context, type Ending, MAX_CALLS, hasWork, recordOf } from './record.js';
-import { type Meta, Reader, readMeta } from './rollout.js';
+import { type Meta, Reader, readMeta, readsAsBefore } from './rollout.js';
 import type { Destination } from './send.js';
 import type { Settings } from './settings.js';
 import { type ThreadState, readState, stateName, subagentsOf, withLock, writeState } from './state.js';
@@ -112,9 +112,12 @@ async function readLocked(
   }
   const state = readState(settings.dir, name);
   const same =
-    state.path === path && (state.ino === undefined || ino === undefined || state.ino === ino) && state.offset <= size;
+    state.path === path &&
+    (state.ino === undefined || ino === undefined || state.ino === ino) &&
+    state.offset <= size &&
+    readsAsBefore(path, state.offset, state.opening);
   const from: Checkpoint = same
-    ? { offset: state.offset, countKey: state.countKey, model: state.model }
+    ? { offset: state.offset, countKey: state.countKey, model: state.model, opening: state.opening }
     : { offset: 0, countKey: undefined, model: undefined };
   const sent = new Set(state.sent);
   const turns = new Turns(meta, sent, input.turnId, from);
@@ -125,6 +128,7 @@ async function readLocked(
     if (ino !== undefined) next.ino = ino;
     if (at.countKey !== undefined) next.countKey = at.countKey;
     if (at.model !== undefined) next.model = at.model;
+    if (at.opening !== undefined) next.opening = at.opening;
     if (state.warnedNoKey) next.warnedNoKey = true;
     writeState(settings.dir, name, next);
     saved = Date.now();

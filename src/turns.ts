@@ -18,7 +18,7 @@
  * are older than the thread itself. A turn already sent is passed over too.
  */
 
-import type { Line, Meta, Outcome, Usage } from './rollout.js';
+import type { Line, Meta, Opening, Outcome, Usage } from './rollout.js';
 
 /** One response of the model: when it was asked and when it finished, and its tokens. */
 export interface Response {
@@ -51,6 +51,8 @@ export interface Checkpoint {
   offset: number;
   countKey: string | undefined;
   model: string | undefined;
+  /** The latest turn to open at or before the offset, by which the next hook knows the rollout as it was. */
+  opening?: Opening | undefined;
 }
 
 export interface Turn {
@@ -84,6 +86,7 @@ export class Turns {
   #previous: number | undefined;
   #countKey: string | undefined;
   #model: string | undefined;
+  #opening: Opening | undefined;
   readonly #responseIds = new Set<string>();
 
   /**
@@ -97,6 +100,7 @@ export class Turns {
     this.#end = from.offset;
     this.#countKey = from.countKey;
     this.#model = from.model;
+    this.#opening = from.opening;
   }
 
   /** Takes the next line; the thread's own turns it closes, which are ready to send. */
@@ -140,7 +144,9 @@ export class Turns {
   /** Where the next read begins: at the open turn's opening, or past every line read. */
   checkpoint(): Checkpoint {
     const current = this.#current;
-    return current?.own ? current.turn.before : { offset: this.#end, countKey: this.#countKey, model: this.#model };
+    return current?.own
+      ? current.turn.before
+      : { offset: this.#end, countKey: this.#countKey, model: this.#model, opening: this.#opening };
   }
 
   /** Whether the turn was copied from the thread's source, its id minted before the thread was. */
@@ -157,11 +163,13 @@ export class Turns {
     const closed: Turn[] = [];
     if (current?.own) closed.push(current.turn);
     const own = !this.#sent.has(turnId) && (turnId === this.#target || !this.#copied(turnId));
+    const opening = { at: line.start, turnId };
+    this.#opening = opening;
     this.#current = {
       own,
       turn: {
         id: turnId,
-        before: { offset: line.start, countKey: this.#countKey, model: this.#model },
+        before: { offset: line.start, countKey: this.#countKey, model: this.#model, opening },
         start: line.time,
         last: line.time,
         model: this.#model,

@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { RunRecord } from 'telmoni';
@@ -254,6 +254,84 @@ describe('a hook', () => {
     renameSync(replaced, path);
     await hook('Stop', path, G);
     expect(sent.map((run) => run.runId)).toEqual([...runIds(A, B, C, E, F), runIdOf(SESSION, G)]);
+  });
+
+  describe('a rollout changed where the last hook left it', () => {
+    const G = `${F.slice(0, 24)}cccccccccccc`;
+    /** Turn G, after the session was resumed; `padding` bytes of output make its rollout as long as needed. */
+    const turnG = (padding = 0): string =>
+      [
+        { timestamp: '2026-10-12T09:03:00.000Z', type: 'event_msg', payload: { type: 'task_started', turn_id: G } },
+        { timestamp: '2026-10-12T09:03:00.005Z', type: 'turn_context', payload: { turn_id: G, model: 'gpt-5.5-codex' } },
+        { timestamp: '2026-10-12T09:03:01.000Z', type: 'response_item', payload: { type: 'function_call', name: 'exec_command', arguments: '{}', call_id: 'call_g1' } },
+        { timestamp: '2026-10-12T09:03:01.050Z', type: 'token_usage_record', payload: { turn_id: G, response_id: 'resp_g1', usage: { input_tokens: 100, cached_input_tokens: 0, output_tokens: 10, reasoning_output_tokens: 0, total_tokens: 110 } } },
+        { timestamp: '2026-10-12T09:03:02.000Z', type: 'response_item', payload: { type: 'function_call_output', call_id: 'call_g1', output: `FAKE${' '.repeat(padding)}` } },
+        { timestamp: '2026-10-12T09:03:03.000Z', type: 'event_msg', payload: { type: 'task_complete', turn_id: G } },
+      ]
+        .map((line) => `${JSON.stringify(line)}\n`)
+        .join('');
+    const sentEarlier = async (): Promise<string> => {
+      const path = writtenThrough(paginated.length);
+      await hook('SessionEnd', path);
+      expect(sent.map((run) => run.runId)).toEqual(runIds(A, B, C, E, F));
+      return path;
+    };
+
+    it('shrunk below that place, is read again from its start, sending none of its turns twice', async () => {
+      const path = await sentEarlier();
+      writeFileSync(path, `${paginated.slice(0, closing(paginated, B) + 1).map(({ text }) => `${text}\n`).join('')}${turnG()}`);
+      await hook('Stop', path, G);
+      expect(sent.map((run) => run.runId)).toEqual([...runIds(A, B, C, E, F), runIdOf(SESSION, G)]);
+    });
+
+    it('rewritten in place, its lines moved, is read again from its start, sending none of its turns twice', async () => {
+      const path = await sentEarlier();
+      const { ino, size } = statSync(path);
+      // Its text cut shorter, and a turn after it long enough to reach past where the last hook stopped.
+      const cut = paginated.map(({ text }) => `${text.replaceAll('see /home/someone/FAKE-project, mail someone@example.com, run rm -rf /home/someone/FAKE-project', 'cut')}\n`).join('');
+      writeFileSync(path, `${cut}${turnG(size)}`);
+      expect(statSync(path).ino).toBe(ino);
+      expect(Buffer.byteLength(cut)).toBeLessThan(size);
+      await hook('Stop', path, G);
+      expect(sent.map((run) => run.runId)).toEqual([...runIds(A, B, C, E, F), runIdOf(SESSION, G)]);
+    });
+
+    it('rewritten in place past the last turn to open, its own opening where it was, is read again from its start', async () => {
+      const path = await sentEarlier();
+      const { size } = statSync(path);
+      const atF = opening(paginated, F);
+      const kept = paginated.slice(0, atF + 1).map(({ text }) => `${text}\n`).join('');
+      const cut = paginated.slice(atF + 1).map(({ text }) => `${text.replaceAll('see /home/someone/FAKE-project, mail someone@example.com, run rm -rf /home/someone/FAKE-project', 'cut')}\n`).join('');
+      writeFileSync(path, `${kept}${cut}${turnG(size)}`);
+      // F still opens where it did: only where a line ends tells the rollout moved.
+      expect(readFileSync(path).subarray(0, Buffer.byteLength(kept)).toString()).toBe(kept);
+      expect(readFileSync(path)[size - 1]).not.toBe(0x0a);
+      await hook('Stop', path, G);
+      expect(sent.map((run) => run.runId)).toEqual([...runIds(A, B, C, E, F), runIdOf(SESSION, G)]);
+    });
+
+    it('rewritten in place before the last turn to open, a line still ending where the last hook stopped, is read again from its start', async () => {
+      const path = await sentEarlier();
+      const { size } = statSync(path);
+      const cut = paginated.map(({ text }) => `${text.replaceAll('see /home/someone/FAKE-project, mail someone@example.com, run rm -rf /home/someone/FAKE-project', 'cut')}\n`).join('');
+      const [startG, ...restG] = turnG().split('\n');
+      // A record Codex may write one day, sized so a line ends right where the last hook stopped.
+      const unknown = (pad: number): string => JSON.stringify({ timestamp: '2026-10-12T09:03:00.001Z', type: 'future_record', payload: { pad: 'x'.repeat(pad) } });
+      const room = size - Buffer.byteLength(cut) - Buffer.byteLength(`${startG}\n`) - 1;
+      const filler = unknown(room - Buffer.byteLength(unknown(0)));
+      writeFileSync(path, `${cut}${startG}\n${filler}\n${restG.join('\n')}`);
+      expect(readFileSync(path)[size - 1]).toBe(0x0a);
+      await hook('Stop', path, G);
+      expect(sent.map((run) => run.runId)).toEqual([...runIds(A, B, C, E, F), runIdOf(SESSION, G)]);
+    });
+
+    it('moved to a new file, as a revert moves a thread, is read from that file’s start, sending none of its turns twice', async () => {
+      await sentEarlier();
+      const moved = join(dir.path, 'rollout-moved.jsonl');
+      writeFileSync(moved, `${paginated.map(({ text }) => `${text}\n`).join('')}${turnG()}`);
+      await hook('Stop', moved, G);
+      expect(sent.map((run) => run.runId)).toEqual([...runIds(A, B, C, E, F), runIdOf(SESSION, G)]);
+    });
   });
 
   it('reads a long rollout in stretches, each turn once', async () => {

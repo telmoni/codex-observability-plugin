@@ -21,6 +21,7 @@ import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 import { isId } from './input.js';
+import type { Opening } from './rollout.js';
 
 export interface ThreadState {
   /** Where in the rollout the first turn not yet sent begins, in bytes. */
@@ -41,6 +42,8 @@ export interface ThreadState {
   countKey?: string;
   /** The model the rollout last named, at the offset, for a turn that names none. */
   model?: string;
+  /** The latest turn to open at or before the offset, and where: the rollout read again from its start where it no longer opens there. */
+  opening?: Opening;
   /** Whether a missing key has been logged for this thread, so it is logged once. */
   warnedNoKey?: boolean;
 }
@@ -79,6 +82,10 @@ export function readState(dir: string, name: string): ThreadState {
     if (Array.isArray(parsed.sent)) state.sent = parsed.sent.filter((id): id is string => typeof id === 'string');
     if (typeof parsed.countKey === 'string') state.countKey = parsed.countKey;
     if (typeof parsed.model === 'string') state.model = parsed.model;
+    const opening = parsed.opening as Partial<Record<keyof Opening, unknown>> | null | undefined;
+    if (Number.isSafeInteger(opening?.at) && (opening?.at as number) >= 0 && typeof opening?.turnId === 'string') {
+      state.opening = { at: opening.at as number, turnId: opening.turnId };
+    }
     if (parsed.warnedNoKey === true) state.warnedNoKey = true;
     return state;
   } catch {

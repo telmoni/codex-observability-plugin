@@ -542,6 +542,48 @@ export class Reader {
   }
 }
 
+/** Where a turn's opening line begins, and the turn: a place in a rollout a hook can find again. */
+export interface Opening {
+  at: number;
+  turnId: string;
+}
+
+/**
+ * Whether the rollout still reads as it did where a hook left it: a line
+ * ends at `offset`, and the turn last seen opening before it opens where it
+ * did. Codex only appends to a rollout, and replaces one whole; one
+ * rewritten where it lies, its lines moved, fails either, and is read again
+ * from its start.
+ */
+export function readsAsBefore(path: string, offset: number, opening: Opening | undefined): boolean {
+  try {
+    if (offset > 0) {
+      const fd = openSync(path, 'r');
+      try {
+        const last = Buffer.alloc(1);
+        if (readSync(fd, last, 0, 1, offset - 1) !== 1 || last[0] !== 0x0a) return false;
+      } finally {
+        closeSync(fd);
+      }
+    }
+    if (opening === undefined) return true;
+    if (opening.at > offset) return false;
+    const reader = new Reader(path, opening.at, 64 * 1024);
+    try {
+      for (;;) {
+        const lines = reader.read();
+        if (lines === undefined) return false;
+        const first = lines[0];
+        if (first !== undefined) return first.event.kind === 'start' && first.event.turnId === opening.turnId;
+      }
+    } finally {
+      reader.close();
+    }
+  } catch {
+    return false;
+  }
+}
+
 /** A line as long as a rollout's first may run: the session's instructions and tools are in it. */
 const META_MAX_BYTES = 16 * 1024 * 1024;
 
