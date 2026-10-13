@@ -4,7 +4,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -75,6 +75,25 @@ function rolloutIn(codex: string, threadId: string): string {
 const offsetOf = (path: string): number | undefined =>
   existsSync(path) ? (JSON.parse(readFileSync(path, 'utf8')) as { offset: number }).offset : undefined;
 
+/**
+ * The command lines of the hook's running copies handed `session`, as anyone
+ * on the machine may list them; Linux's `/proc` alone says, and only the
+ * hook's own processes are looked into.
+ */
+function copiesOf(session: string): string[][] {
+  const found: string[][] = [];
+  for (const pid of readdirSync('/proc').filter((name) => /^\d+$/.test(name))) {
+    try {
+      const command = readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').filter(Boolean);
+      if (!command.includes(HOOK)) continue;
+      if (readFileSync(`/proc/${pid}/environ`, 'utf8').includes(`"sessionId":"${session}"`)) found.push(command);
+    } catch {
+      // Gone already.
+    }
+  }
+  return found;
+}
+
 describe('the hook', () => {
   it('prints nothing, exits at once, and its detached copy sends the stopped turn once Codex writes its closing line', async () => {
     expect(existsSync(HOOK), 'build the hook first: npm run build').toBe(true);
@@ -102,6 +121,12 @@ describe('the hook', () => {
     );
     expect(ran).toMatchObject({ code: 0, stdout: '', stderr: '' });
     expect(ran.ms).toBeLessThan(1500);
+    if (process.platform === 'linux') {
+      // The copy waiting on the closing line: its input in its environment, nothing on its command line.
+      let copies: string[][] = [];
+      expect(await until(() => (copies = copiesOf(session)).length > 0, 5_000)).toBe(true);
+      expect(copies).toEqual([[process.execPath, HOOK]]);
+    }
     // Codex writes the turn's closing line once its Stop hooks have returned.
     appendFileSync(rollout, `${lines[closing]!.text}\n`);
     const state = join(codex, 'telmoni', `${session}.json`);
@@ -158,6 +183,28 @@ describe('the hook', () => {
     expect(refusalsIn(ingest.spans())).toEqual([]);
     expect(ingest.received.every((request) => request.headers['authorization'] === 'Bearer telmoni_test')).toBe(true);
     expect(existsSync(join(home.path, '.codex'))).toBe(false);
+  }, 30_000);
+
+  it('logs a turn the platform refused by its answer alone: never the key, the endpoint or anything of the session', async () => {
+    ingest.status = 403;
+    const session = readMeta(fixture('legacy'))!.sessionId;
+    const codex = join(home.path, '.codex');
+    const rollout = rolloutIn(codex, session);
+    writeFileSync(rollout, readFileSync(fixture('legacy')));
+    const ran = await runHook(
+      { session_id: session, transcript_path: rollout, cwd: home.path, hook_event_name: 'SessionEnd', reason: 'other' },
+      { TELMONI_API_KEY: 'telmoni_test', TELMONI_ENDPOINT: endpoint },
+    );
+    expect(ran).toMatchObject({ code: 0, stdout: '', stderr: '' });
+    const log = join(codex, 'telmoni', 'hook.log');
+    expect(await until(() => existsSync(log), 20_000)).toBe(true);
+    const written = readFileSync(log, 'utf8');
+    expect(written).toMatch(/^\S+ SessionEnd [0-9a-f]{8}: not sent: telmoni: export refused with 403 \/errors\/authz\/forbidden; the batch was dropped\n$/);
+    for (const text of [...CONTENT, home.path, 'telmoni_test', endpoint]) expect(written).not.toContain(text);
+    if (process.platform !== 'win32') {
+      expect(statSync(join(codex, 'telmoni')).mode & 0o777).toBe(0o700);
+      expect(statSync(log).mode & 0o777).toBe(0o600);
+    }
   }, 30_000);
 
   it('sends nothing without a key, and says so in its log once, with nothing from the session', async () => {

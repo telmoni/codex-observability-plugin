@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { RunRecord } from 'telmoni';
@@ -7,10 +7,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { HookEvent, HookInput } from '../src/input';
 import { MAX_CALLS, runIdOf } from '../src/record';
 import { readMeta } from '../src/rollout';
+import { Sender } from '../src/send';
 import { type Deps, sync } from '../src/session';
 import type { Settings } from '../src/settings';
 import { readState, stateName, withLock, writeState } from '../src/state';
-import { fixture, fixtureLines, payloadOf, tempDir } from './helpers';
+import { CONTENT, FakeIngest, fixture, fixtureLines, payloadOf, tempDir } from './helpers';
 
 let dir: { path: string; remove: () => void };
 let settings: Settings;
@@ -452,6 +453,98 @@ describe('a fork', () => {
     const path = writtenThrough(fork.length, fork);
     await hook('Stop', path, own, {}, { sessionId: meta.sessionId, threadId: meta.threadId });
     expect(sent.map((run) => run.runId)).toEqual([runIdOf(meta.sessionId, own)]);
+  });
+});
+
+describe('a turn sent again', () => {
+  let ingest: FakeIngest;
+  let real: Partial<Deps>;
+
+  beforeEach(async () => {
+    ingest = new FakeIngest();
+    settings.endpoint = await ingest.start();
+    real = { sender: (destination) => new Sender(destination, (line) => void logged.push(line)) };
+  });
+
+  afterEach(async () => {
+    await ingest.stop();
+  });
+
+  const bodies = (from = 0): string[] => ingest.received.slice(from).map((request) => request.body);
+
+  it('after a hook died between sending it and saving that it had, is the same bytes', async () => {
+    const path = writtenThrough(paginated.length);
+    await hook('SessionEnd', path, undefined, real);
+    const first = bodies();
+    expect(first).toHaveLength(5);
+    // As though the state had never been saved.
+    rmSync(join(settings.dir, `${SESSION}.json`));
+    await hook('SessionEnd', path, undefined, real);
+    expect(bodies(first.length)).toEqual(first);
+  });
+
+  it('after Telmoni refused it, then answered again, is the same bytes, and the turns after it follow', async () => {
+    const path = writtenThrough(paginated.length);
+    ingest.answers.push({ status: 500 });
+    await hook('SessionEnd', path, undefined, real);
+    expect(bodies()).toHaveLength(1);
+    expect(logged).toEqual([expect.stringMatching(/^not sent: telmoni: export refused with 500 /) as unknown]);
+    await hook('SessionEnd', path, undefined, real);
+    const [tried, ...after] = bodies();
+    expect(after).toHaveLength(5);
+    expect(after[0]).toBe(tried);
+  });
+
+  it('after Telmoni could not be reached, is sent once it can be, as the bytes it tried', async () => {
+    const path = writtenThrough(paginated.length);
+    const reachable = settings.endpoint;
+    // Nothing listens on the discard port: every attempt the SDK makes is refused a connection.
+    settings.endpoint = 'http://127.0.0.1:9';
+    await hook('SessionEnd', path, undefined, real);
+    expect(logged).toEqual([expect.stringMatching(/^not sent: telmoni: export failed after 3 attempts/) as unknown]);
+    expect(readState(settings.dir, SESSION).offset).toBe(Buffer.byteLength(`${paginated[0]!.text}\n`));
+    settings.endpoint = reachable;
+    await hook('SessionEnd', path, undefined, real);
+    expect(bodies().map((body) => (JSON.parse(body) as { resourceSpans: unknown[] }).resourceSpans.length)).toHaveLength(5);
+    expect(readState(settings.dir, SESSION).offset).toBe(readFileSync(path).length);
+  }, 30_000);
+});
+
+describe('what a hook keeps', () => {
+  it('is metadata alone, readable by the person alone: ids, offsets, the rollout it reads, a model', async () => {
+    const path = writtenThrough(paginated.length);
+    await hook('Stop', path, F);
+    settings.apiKey = undefined;
+    await hook('Stop', path, F);
+    const files = readdirSync(settings.dir);
+    expect(files.sort()).toEqual([`${SESSION}.json`]);
+    const kept = readFileSync(join(settings.dir, `${SESSION}.json`), 'utf8');
+    const allowed = ['countKey', 'ino', 'model', 'offset', 'opening', 'path', 'sent', 'warnedNoKey'];
+    expect(Object.keys(JSON.parse(kept) as object).filter((key) => !allowed.includes(key))).toEqual([]);
+    for (const text of CONTENT) expect(kept).not.toContain(text);
+    if (process.platform !== 'win32') {
+      expect(statSync(settings.dir).mode & 0o777).toBe(0o700);
+      expect(statSync(join(settings.dir, `${SESSION}.json`)).mode & 0o777).toBe(0o600);
+    }
+  });
+});
+
+describe('two hooks of a thread at once', () => {
+  it('send each turn once between them', async () => {
+    const path = writtenThrough(paginated.length);
+    const slow: Partial<Deps> = {
+      sender: () => ({
+        send: async (record) => {
+          await new Promise((resolve) => setTimeout(resolve, 30));
+          sent.push(record);
+          return true;
+        },
+        close: () => Promise.resolve(),
+      }),
+    };
+    await Promise.all([hook('Stop', path, F, slow), hook('SessionEnd', path, undefined, slow), hook('Stop', path, F, slow)]);
+    expect(sent.map((run) => run.runId).sort()).toEqual(runIds(A, B, C, E, F).sort());
+    expect(logged).toEqual([]);
   });
 });
 

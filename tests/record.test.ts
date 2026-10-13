@@ -1,3 +1,6 @@
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { Telmoni } from 'telmoni';
 import type { ModelCallRecord, RunRecord, ToolCallRecord } from 'telmoni';
 import { describe, expect, it } from 'vitest';
@@ -5,11 +8,10 @@ import { describe, expect, it } from 'vitest';
 import { AGENT, type Ending, MAX_CALLS, hasWork, recordOf, runIdOf, uuid5 } from '../src/record';
 import { type Event, type Line, type Meta, Reader, type Usage, readMeta } from '../src/rollout';
 import { type Turn, Turns, mintedAt } from '../src/turns';
-import { CONTENT, fixture, fixtureLines, payloadOf } from './helpers';
+import { CONTENT, fixture, fixtureLines, payloadOf, tempDir } from './helpers';
 
-/** A fixture's turns, read whole: those it closed, and the one left open. */
-function turnsOf(name: string, target?: string): { meta: Meta; closed: Turn[]; open: Turn | undefined } {
-  const path = fixture(name);
+/** A rollout's turns, read whole: those it closed, and the one left open. */
+function turnsAt(path: string, target?: string): { meta: Meta; closed: Turn[]; open: Turn | undefined } {
   const meta = readMeta(path)!;
   const turns = new Turns(meta, new Set(), target, { offset: 0, countKey: undefined, model: undefined });
   const closed: Turn[] = [];
@@ -24,14 +26,18 @@ function turnsOf(name: string, target?: string): { meta: Meta; closed: Turn[]; o
   return { meta, closed, open: turns.open };
 }
 
-/** A fixture's runs, as hooks would send them: each closed turn with work, and the open one where `ending` says why. */
-function runsOf(name: string, options: { target?: string; ending?: Ending } = {}): RunRecord[] {
-  const { meta, closed, open } = turnsOf(name, options.target);
+const turnsOf = (name: string, target?: string): ReturnType<typeof turnsAt> => turnsAt(fixture(name), target);
+
+/** A rollout's runs, as hooks would send them: each closed turn with work, and the open one where `ending` says why. */
+function runsAt(path: string, options: { target?: string; ending?: Ending } = {}): RunRecord[] {
+  const { meta, closed, open } = turnsAt(path, options.target);
   const context = { sessionId: meta.sessionId, provider: meta.provider, model: undefined };
   const runs = closed.filter(hasWork).map((turn) => recordOf(turn, context)!);
   if (open !== undefined && hasWork(open) && options.ending !== undefined) runs.push(recordOf(open, context, options.ending)!);
   return runs;
 }
+
+const runsOf = (name: string, options: { target?: string; ending?: Ending } = {}): RunRecord[] => runsAt(fixture(name), options);
 
 /** A fixture's turn ids in the order they open, read independently of the plugin. */
 function turnIds(name: string): string[] {
@@ -222,6 +228,48 @@ describe('a turn as a run', () => {
         'usage',
       ].sort(),
     );
+  });
+});
+
+describe('a rollout with records and fields the plugin does not know', () => {
+  it('makes the same runs as without them, keeping nothing of them', () => {
+    const dir = tempDir();
+    try {
+      const future = 'FAKE future: see /home/someone/FAKE-project';
+      const known = fixtureLines('paginated');
+      const lines = known.flatMap(({ record }, index) => {
+        // A field Codex may add to any record, its item or its usage, with text in it.
+        const payload: Record<string, unknown> = { ...payloadOf(record), future_field: future };
+        if (typeof payload['item'] === 'object') payload['item'] = { ...(payload['item'] as object), future_field: future };
+        if (typeof payload['usage'] === 'object') payload['usage'] = { ...(payload['usage'] as object), future_tokens: 7 };
+        const at = record['timestamp'];
+        const added: Array<Record<string, unknown>> = [{ ...record, payload }];
+        // Records Codex may add, written as the line before them was, so no time in the turn moves.
+        if (index > 0) {
+          added.push(
+            { timestamp: at, type: 'future_record', payload: { text: future, turn_id: 'future' } },
+            { timestamp: at, type: 'event_msg', payload: { type: 'future_event', message: future } },
+            { timestamp: at, type: 'response_item', payload: { type: 'future_item', content: future, call_id: 'call_future' } },
+          );
+        }
+        return added.map((line) => JSON.stringify(line));
+      });
+      lines.splice(5, 0, '[1, 2]', JSON.stringify(future), 'null');
+      const path = join(dir.path, 'rollout.jsonl');
+      writeFileSync(path, lines.map((line) => `${line}\n`).join(''));
+      const F = turnIds('paginated').at(-1)!;
+      expect(runsAt(path, { target: F, ending: 'stopped' })).toEqual(runsOf('paginated', { target: F, ending: 'stopped' }));
+      const reader = new Reader(path, 0);
+      const kept: unknown[] = [];
+      try {
+        for (let read = reader.read(); read !== undefined; read = reader.read()) kept.push(...read);
+      } finally {
+        reader.close();
+      }
+      expect(JSON.stringify(kept)).not.toMatch(/FAKE|future/);
+    } finally {
+      dir.remove();
+    }
   });
 });
 
