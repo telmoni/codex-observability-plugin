@@ -318,6 +318,28 @@ describe('a turn’s owner', () => {
   });
 });
 
+describe('a turn’s closing', () => {
+  it('closes only the turn it names: one for a turn closed already leaves the open one running', () => {
+    const meta: Meta = { threadId: 't', sessionId: 't', created: at(0), derived: false, ownFrom: undefined, provider: 'openai' };
+    let place = 0;
+    const line = (event: Event): Line => ({ start: place, end: ++place, time: at(1) + place, ordinal: undefined, event });
+    const turns = new Turns(meta, new Set(), undefined, { offset: 0, countKey: undefined, model: 'gpt-5.5-codex' });
+    const closed = [
+      line({ kind: 'start', turnId: 'first' }),
+      line({ kind: 'output' }),
+      // The next turn opens before the first's interruption is written.
+      line({ kind: 'start', turnId: 'next' }),
+      line({ kind: 'aborted', turnId: 'first', reason: 'interrupted', errorType: undefined }),
+      line({ kind: 'output' }),
+      line({ kind: 'complete', turnId: 'next', errorType: undefined }),
+    ].flatMap((each) => turns.push(each));
+    expect(closed.map((turn) => [turn.id, turn.closing?.aborted, turn.responses.length])).toEqual([
+      ['first', undefined, 1],
+      ['next', false, 1],
+    ]);
+  });
+});
+
 describe('a response’s tokens', () => {
   it('are Codex’s record of it where it wrote one, and its share of the running total only where it wrote none', () => {
     const meta: Meta = { threadId: 't', sessionId: 't', created: at(0), derived: false, ownFrom: undefined, provider: 'openai' };
@@ -437,5 +459,10 @@ describe('a run id', () => {
   it('is a version 5 UUID as RFC 9562 derives one', () => {
     // RFC 9562's own example: the DNS namespace and "www.example.com".
     expect(uuid5('6ba7b810-9dad-11d1-80b4-00c04fd430c8', 'www.example.com')).toBe('2ed6657d-e927-568b-95e1-2665a8aea6a2');
+  });
+
+  it('is the session’s and the turn’s under the plugin’s namespace, never to change: a turn sent before an update and again after it is one run', () => {
+    // Python's uuid.uuid5(UUID('188e660b-8a52-464f-ad0e-81f2a9339eee'), '<session>/<turn>') agrees.
+    expect(runIdOf('01a12f57-06f8-7000-8000-010123456789', '01a12f57-1e68-7000-8000-0a0123456789')).toBe('99b99f25-42d2-5878-93d9-a3424b0baf97');
   });
 });
