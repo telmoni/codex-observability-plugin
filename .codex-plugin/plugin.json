@@ -1,0 +1,26 @@
+{
+  "name": "telmoni-observability",
+  "version": "0.1.0",
+  "description": "Records each turn of your Codex sessions in Telmoni as a run: the models, their tokens, the tools and the times. Never a prompt, a reply, a thought, a tool's input or output, or a path.",
+  "author": {
+    "name": "Telmoni",
+    "email": "hello@telmoni.com",
+    "url": "https://telmoni.com"
+  },
+  "homepage": "https://telmoni.com/docs/api/coding-agents",
+  "repository": "https://github.com/telmoni/codex-observability-plugin",
+  "license": "Apache-2.0",
+  "keywords": ["telmoni", "observability", "monitoring", "agents"],
+  "hooks": "./hooks/hooks.json",
+  "interface": {
+    "displayName": "Telmoni Observability",
+    "shortDescription": "Each turn of your Codex sessions recorded in Telmoni, metadata only",
+    "longDescription": "Records each turn of your Codex sessions in Telmoni as a run: the models it called and their tokens, the tools it used, each with its times and whether it failed. Never a prompt, a reply, a thought, a tool's input or output, a command, a path or the folder you work in.",
+    "developerName": "Telmoni",
+    "category": "Coding",
+    "capabilities": ["Read"],
+    "websiteURL": "https://telmoni.com",
+    "privacyPolicyURL": "https://telmoni.com/docs/legal/privacy-policy",
+    "termsOfServiceURL": "https://telmoni.com/docs/legal/terms-of-service"
+  }
+}
