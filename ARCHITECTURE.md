@@ -1,0 +1,69 @@
+# Architecture
+
+How the Codex plugin records a session, and why it is built so. What a person installs and sees is the book's page, [telmoni.com/docs/api/coding-agents](https://telmoni.com/docs/api/coding-agents).
+
+## The shape
+
+```
+Codex ──(Stop, SubagentStop, Interrupt, SessionEnd)──▶ node dist/hook.mjs
+                                                          │ reads stdin, starts a detached copy, exits 0, prints nothing
+                                                          ▼
+                                       the copy: takes the thread's lock, reads its rollout
+                                       from the saved offset, waits up to a minute for the
+                                       named turn's closing line, cuts what it read into
+                                       turns, and for each of the thread's own that has ended:
+                                       RunRecord ──▶ the SDK's recordRun ──▶ POST /otlp/v1/traces
+                                       then saves the offset past it
+```
+
+A turn of the agent is a run of `codex`; Codex's session id is the run's session, so a session reads in the console as a session of traces. Each response of the model is a model call, and each tool call a tool call; a subagent's turns are runs of the same session. Codex's own OpenTelemetry export (`[otel]`) is not used: a plugin cannot set it, its logs carry the person's email and a tool's arguments, and its traces are Codex's internal span tree, with no turn's tokens, tools and outcome in one place.
+
+## A hook that never holds the session
+
+Codex waits for its hooks, and reads what a `Stop` hook prints as its decision: plain text is an invalid answer, on every turn, and exit 2 makes Codex carry the turn on. So the hook reads its input — the event, the session, the thread and its rollout's path, the turn and its model, nothing else — and starts a copy of itself, detached and with no stdio, handing it that input in its environment rather than its command line, which anyone on the machine can list. Then it exits 0, having printed nothing; Codex leaves a hook's detached processes running once it has returned, so a slow network or a Telmoni that does not answer never slows a turn. Whatever goes wrong after is a line in `hook.log`, never an error the session shows.
+
+Each hook is given ten seconds at `Stop` and `SubagentStop`, and three, the most Codex allows, at `Interrupt` and `SessionEnd`; it needs a fraction of one. Its command, `node "${PLUGIN_ROOT}/dist/hook.mjs"`, names no version and no shell's variable — Codex puts the plugin's folder in itself — since Codex asks the person to trust a hook again whenever its command changes.
+
+## Reading a rollout
+
+A rollout is JSON Lines that Codex appends as a thread goes (`~/.codex/sessions/…/rollout-…-<thread>.jsonl`), in one of two dialects: legacy, or paginated (`session_meta.history_mode`), which numbers its records and writes a completion for every item. The copy reads whole lines forward from the thread's saved offset, four megabytes at a time, so a rollout grown to gigabytes is never read from its start twice; a last line without its newline is still being written, and waits for the next read. Each line is parsed, and what the plugin keeps of it is picked out by field there and then: its kind and time, a turn's id and outcome, a model's name, Codex's token counts, a tool call's id and name, and its completion's status, exit code and times. A line past 32 megabytes, only ever a tool's output or a compaction's summary, is passed over unparsed.
+
+**Turns.** A turn opens at `task_started` and closes at its `task_complete` or `turn_aborted`; one Codex left open closes at the next turn's opening. Nothing outside a turn opens one, so the closing line of a turn already sent, or a fork's boundary for a turn whose opening is in another rollout, is passed over.
+
+**When a turn has ended.** A turn has ended at its closing line, and at `Stop` and `SubagentStop` the turn the hook names has ended too: Codex runs those hooks before it writes the turn's `task_complete`, which follows once every `Stop` hook has returned and any compaction Codex runs at a turn's end is done. The copy waits up to a minute for that line, for the turn's outcome and its last call, and sends the turn as it stands if the line does not come. `Interrupt` names a turn the person cut short, before Codex writes its `turn_aborted`; the copy waits for that line too, and sends the turn cancelled either way. A turn an error ended, a command run with `!` and a `/compact` get no hook of their own: the next hook sends them, or `SessionEnd`, which also ends whatever was left open as cancelled.
+
+**What is a run.** A turn holding the model's work is a run. A command the person ran with `!` holds none, and is passed over; a compaction holds the call that summarized the context, and is a run of that one call.
+
+**Responses and tokens.** The model's output — its reasoning, its replies, its calls — is one response until something goes back to the model, a tool's answer or a prompt, after which its next output is the next response. A response's tokens are Codex's record of it, `token_usage_record`, written as the response completed (Codex 0.153 on); where Codex wrote none, its share of the running total, `token_count`, which Codex writes once the response's tools have run. A share counts only where the total is new, since Codex writes the total again whenever its rate limits refresh, and only where it reads true, since after a compaction it is an estimate, zero but for its total; a response is never given both. OpenAI counts input with its cached tokens inside it and output with its reasoning inside it, as the SDK takes them: a call's input is `input_tokens`, its cache's reads `cached_input_tokens` and writes `cache_write_input_tokens`, and its output `output_tokens`.
+
+**Tool calls.** A function call, a custom tool's call (`apply_patch`), a local shell's, a tool search, a web search and an image generation are each a tool call by name, an MCP tool's as `mcp__<server>__<tool>` from Codex's own record of the call. Paginated history records each tool's completion: a command's status and exit code, an MCP tool's, a patch's or a dynamic tool's status. A call failed there is failed (`ToolError`), and one the person declined, or a subagent interrupted, cancelled. Legacy history records an MCP tool's outcome and a patch's, but a command's exit code only inside its output's text, which is never read: such a command is recorded as run. A call never answered, its turn interrupted or ended first, is cancelled.
+
+**Times.** A line's time is when Codex wrote it. A response starts as the line before its first was written, the request going out then, and ends as its record was written, or with its last output. A tool call runs from when Codex started it to when it finished where Codex records those, and otherwise from the model's call to its answer. A turn runs from its opening to its closing line, or to its last line where it has none.
+
+## Forks and subagents
+
+A subagent Codex spawns works in a thread of its own, its rollout its own (`agent_transcript_path` at `SubagentStop`), and its turns are runs of the session that spawned it. A thread forked or spawned from another may begin with the other's history: a legacy fork copies its source's turns, the source's turn still running closed by a boundary the fork writes, and a subagent's rollout begins with its parent's history, which a paginated rollout numbers below `subagent_history_start_ordinal`. Those turns are the source's, sent by the source's own hooks, and never again: nothing below that ordinal is read, and in a thread forked or spawned from another, a turn whose id — a version 7 UUID, minted as the turn began — is older than the thread itself is passed over. A paginated fork leaves its source's history in the source (`history_base`) and holds only its own.
+
+## Ids, and sending each turn once
+
+A run's id is a version 5 UUID of the session's id and the turn's, under the plugin's own namespace, so a turn read twice is the same run. The SDK derives every span's id from the run's id and its place in the record, and queues a record in one synchronous pass, so the same turn sent again is the same bytes; ingest's claim on a body answers a second copy as it answered the first, for an hour.
+
+Each turn goes in an export of its own, flushed before the next, and counts as taken once the SDK reports no warning; the state is saved past it, at most once a second while a long rollout is read, and always at the end. A turn the platform did not take is read again from its opening by the next hook, and one the SDK itself refuses — an impossible time — is logged and passed over, since it would be refused on every hook. The turns sent are kept with the offset, so a rollout read again from its start sends none of them twice.
+
+A lock per thread (`<session>.lock`, `<session>.<thread>.lock`), freshened every ten seconds by the hook holding it and taken as left by a hook that died once a minute stale, keeps a `Stop`, an `Interrupt` and a `SessionEnd` from sending the same turns at once; a hook that waits two and a half minutes without it gives up, and the next hook sends.
+
+## Where things are kept
+
+Beside the folder Codex runs with (`CODEX_HOME`, `~/.codex` by default), in `telmoni/`: each thread's state — `<session>.json` for the session's own thread, `<session>.<thread>.json` for a subagent's, so the session's end finds its subagents' — holding the offset, the rollout it is into and that file's identity, the turns sent, the running total and the model the rollout last named before the offset, and whether a missing key was logged; the locks; and `hook.log`, moved to `hook.log.1` past a megabyte. All of it mode `600` in a folder of mode `700`. A thread moved to a new rollout, as a revert moves one, or a rollout Codex rewrote in place, is read again from its start. Codex's `PLUGIN_DATA` would keep the state as well — it too outlives an update — but `~/.codex/telmoni/` is where a person looks, as `~/.claude/telmoni/` is for the Claude Code plugin.
+
+The key and the endpoint are `TELMONI_API_KEY` and `TELMONI_ENDPOINT` in the environment Codex hands its hooks — Codex's own, `~/.codex/.env` loaded into it, which keeps for hooks the names with `KEY` in them that it strips from a model's commands — and, where those are unset, the plugin's own file, `~/.codex/telmoni.json` (`{ "apiKey", "endpoint" }`, mode `600`): Codex keeps no settings and no secrets for a plugin's hooks. Without a key nothing is sent, and the log says so once per thread. The provider is Codex's own name for it, the rollout's `model_provider` (`openai`).
+
+## What ships
+
+The npm package `telmoni-codex-observability-plugin` holds `.codex-plugin/plugin.json`, `hooks/hooks.json` and `dist/hook.mjs` — tsup's one bundle of the plugin, the SDK and OpenTelemetry — beside `package.json`, `README.md` and `LICENSE`, which npm always adds. Codex fetches it with the person's own npm (`npm pack --ignore-scripts`), installs no dependencies and runs none of its scripts; the hook needs Node 22 or later on `PATH`, and nothing installed. The marketplace is this repository's `.agents/plugins/marketplace.json`, added with `--sparse .agents/plugins`, so an install fetches the manifest and never `src/` or `tests/`; plugins with hooks are kept out of OpenAI's own directory, so the repository is its own marketplace. Codex 0.143 is the first to fetch a plugin from npm; `SessionEnd` came with 0.145 and `Interrupt` with 0.150, and an older Codex passes over a hook for an event it does not have.
+
+Until the SDKs are published, the SDK is a development dependency by path (`file:../telmoni/sdk/typescript`), bundled at build; publishing this package waits on theirs, and the dependency becomes the registry's `telmoni` in the same change.
+
+## Testing
+
+`tests/` runs the reader, the turns and the record over synthetic rollouts (`tests/fixtures/`, written from the record shapes in Codex's source, every text in them fake): both dialects, two forks and a subagent; the session's hook against a fake sender, over rollouts written as Codex writes them, a closing line arriving while the hook waits, a turn the platform did not take, a rollout rewritten in place and one of many megabytes; the sender through the real SDK to a fake ingest; the manifests and the package as Codex reads them, since Codex ships no validator; and the built hook as Codex runs it, a process handed its input on stdin that must print nothing and exit at once while its copy sends.
