@@ -76,6 +76,27 @@ function usageOf(usage: Usage): NonNullable<ModelCallRecord['usage']> {
   };
 }
 
+/**
+ * Ingest's caps on a name: a tool's, and a model call's span, named `chat`
+ * and its model, up to 128 characters. A span past either is refused whole,
+ * the same way on every hook, so a longer name is cut rather than sent.
+ */
+const NAME_MAX = 128;
+const MODEL_MAX = NAME_MAX - 'chat '.length;
+
+/** `name` cut to `max` characters, as ingest counts them: never inside one. */
+function cut(name: string, max: number): string {
+  const characters = [...name];
+  return characters.length <= max ? name : characters.slice(0, max).join('');
+}
+
+/**
+ * The most calls a run holds, its earliest: the SDK queues a record whole,
+ * and a turn past what its queue is sized for would be cut short on every
+ * hook, and never taken.
+ */
+export const MAX_CALLS = 10_000;
+
 /** Whether the turn holds any of the model's work, which is what makes it a run. */
 export function hasWork(turn: Turn): boolean {
   return turn.responses.length > 0;
@@ -91,7 +112,7 @@ export function recordOf(turn: Turn, context: Context, ending?: Ending): RunReco
   turn.responses.forEach((response, index) => {
     const call: ModelCallRecord = {
       type: 'model_call',
-      model: response.model ?? turn.model ?? context.model ?? 'unknown',
+      model: cut(response.model ?? turn.model ?? context.model ?? 'unknown', MODEL_MAX),
       start: response.start,
       end: Math.max(response.start, response.end),
     };
@@ -111,7 +132,7 @@ export function recordOf(turn: Turn, context: Context, ending?: Ending): RunReco
   for (const tool of turn.calls.values()) {
     const from = tool.ranFrom ?? tool.start;
     const to = tool.ranTo ?? (tool.ranMs !== undefined ? from + tool.ranMs : tool.answeredAt);
-    const call: ToolCallRecord = { type: 'tool_call', name: tool.name, start: from, end: Math.max(from, to ?? until) };
+    const call: ToolCallRecord = { type: 'tool_call', name: cut(tool.name, NAME_MAX), start: from, end: Math.max(from, to ?? until) };
     // Declined, or never answered because the turn was interrupted, or ended, first.
     if (to === undefined || tool.outcome === 'cancelled') call.cancelled = true;
     else if (tool.outcome === 'failed') call.errorType = 'ToolError';
@@ -121,13 +142,14 @@ export function recordOf(turn: Turn, context: Context, ending?: Ending): RunReco
   // span's place in it, come out the same however the lines were written.
   const order = new Map(items.map((item, index) => [item, index]));
   items.sort((a, b) => Number(a.start) - Number(b.start) || order.get(a)! - order.get(b)!);
+  const inside = items.slice(0, MAX_CALLS);
   const record: RunRecord = {
     runId: runIdOf(context.sessionId, turn.id),
     agent: AGENT,
     sessionId: context.sessionId,
     start,
-    end: items.reduce((latest, item) => Math.max(latest, Number(item.end)), until),
-    inside: items,
+    end: inside.reduce((latest, item) => Math.max(latest, Number(item.end)), until),
+    inside,
   };
   if (outcome.errorType !== undefined) record.errorType = outcome.errorType;
   if (outcome.cancelled) record.cancelled = true;

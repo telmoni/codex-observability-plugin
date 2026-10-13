@@ -5,7 +5,7 @@ import type { RunRecord } from 'telmoni';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { HookEvent, HookInput } from '../src/input';
-import { runIdOf } from '../src/record';
+import { MAX_CALLS, runIdOf } from '../src/record';
 import { readMeta } from '../src/rollout';
 import { type Deps, sync } from '../src/session';
 import type { Settings } from '../src/settings';
@@ -213,6 +213,25 @@ describe('a hook', () => {
     await hook('Stop', path, turns.at(-1)!);
     expect(sent.map((run) => run.runId)).toEqual(runIds(...turns));
     expect(readState(settings.dir, SESSION).offset).toBe(readFileSync(path).length);
+  }, 30_000);
+
+  it('sends a turn of more calls than a run holds as a run of its earliest, and says how many it left out', async () => {
+    const turnId = '0190a000-2000-7000-8000-000000000000';
+    const at = (ms: number): string => new Date(Date.UTC(2026, 9, 12, 10) + ms).toISOString();
+    const lines: string[] = [paginated[0]!.text, JSON.stringify({ timestamp: at(0), type: 'event_msg', payload: { type: 'task_started', turn_id: turnId } })];
+    const asks = MAX_CALLS / 2 + 1;
+    for (let i = 0; i < asks; i++) {
+      lines.push(
+        JSON.stringify({ timestamp: at(10 * i + 1), type: 'response_item', payload: { type: 'function_call', name: 'exec_command', arguments: '{}', call_id: `c${i}` } }),
+        JSON.stringify({ timestamp: at(10 * i + 5), type: 'response_item', payload: { type: 'function_call_output', call_id: `c${i}`, output: 'FAKE' } }),
+      );
+    }
+    lines.push(JSON.stringify({ timestamp: at(10 * asks), type: 'event_msg', payload: { type: 'task_complete', turn_id: turnId } }));
+    const path = join(dir.path, 'rollout.jsonl');
+    writeFileSync(path, lines.map((line) => `${line}\n`).join(''));
+    await hook('Stop', path, turnId);
+    expect(sent.map((run) => [run.runId, run.inside?.length])).toEqual([[runIdOf(SESSION, turnId), MAX_CALLS]]);
+    expect(logged).toEqual([`turn too long: 2 of its ${MAX_CALLS + 2} calls, the latest, not sent`]);
   }, 30_000);
 
   it('sends nothing without a key, and says so once', async () => {

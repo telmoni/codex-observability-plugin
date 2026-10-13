@@ -122,6 +122,36 @@ describe('a rollout', () => {
     expect(counts.find((count) => count.usage !== undefined)!.usage).toEqual({ input: 12000, cached: 8000, cacheWrite: 0, output: 300 });
   });
 
+  it('keeps nothing ingest would refuse for good: no half a character, no count past a number’s, no time outside OTLP’s', () => {
+    const path = join(dir.path, 'rollout.jsonl');
+    const at = '2026-10-12T09:00:00.000Z';
+    const lines = [
+      // JSON.stringify writes a lone surrogate as its escape, as a torn write could leave one.
+      { timestamp: at, type: 'turn_context', payload: { turn_id: 't', model: 'gpt-\ud800' } },
+      { timestamp: at, type: 'response_item', payload: { type: 'function_call', name: 'exec_\udfff', arguments: '{}', call_id: 'c1' } },
+      { timestamp: at, type: 'token_usage_record', payload: { turn_id: 't', response_id: 'r1', usage: { input_tokens: 1e21, cached_input_tokens: 2 ** 53, output_tokens: 7 } } },
+      { timestamp: '1970-01-01T00:00:00.000Z', type: 'event_msg', payload: { type: 'task_started', turn_id: 'epoch' } },
+      { timestamp: '1969-12-31T23:59:59.000Z', type: 'event_msg', payload: { type: 'task_started', turn_id: 'before' } },
+      { timestamp: '2300-01-01T00:00:00.000Z', type: 'event_msg', payload: { type: 'task_started', turn_id: 'after' } },
+      {
+        timestamp: at,
+        type: 'event_msg',
+        payload: { type: 'item_completed', started_at_ms: 1e300, completed_at_ms: -5, item: { type: 'CommandExecution', id: 'c1', status: 'completed', exit_code: 0, duration: { secs: 1e300, nanos: 0 } } },
+      },
+    ];
+    writeFileSync(path, lines.map((line) => `${JSON.stringify(line)}\n`).join(''));
+    expect(readAll(path).map((line) => [line.time, line.event])).toEqual([
+      [Date.parse(at), { kind: 'context', turnId: 't', model: undefined }],
+      // A call with no name to keep is still the model at work.
+      [Date.parse(at), { kind: 'output' }],
+      [Date.parse(at), { kind: 'usage', turnId: 't', responseId: 'r1', usage: { input: 0, cached: 0, cacheWrite: 0, output: 7 } }],
+      [undefined, { kind: 'start', turnId: 'epoch' }],
+      [undefined, { kind: 'start', turnId: 'before' }],
+      [undefined, { kind: 'start', turnId: 'after' }],
+      [Date.parse(at), { kind: 'done', callId: 'c1', name: undefined, outcome: undefined, startMs: undefined, endMs: undefined, durationMs: undefined }],
+    ]);
+  });
+
   it('names a turn’s error by its kind, never its message', () => {
     const path = join(dir.path, 'rollout.jsonl');
     const closing = (error: unknown): string =>

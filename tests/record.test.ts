@@ -1,7 +1,7 @@
 import type { ModelCallRecord, RunRecord, ToolCallRecord } from 'telmoni';
 import { describe, expect, it } from 'vitest';
 
-import { AGENT, type Ending, hasWork, recordOf, runIdOf, uuid5 } from '../src/record';
+import { AGENT, type Ending, MAX_CALLS, hasWork, recordOf, runIdOf, uuid5 } from '../src/record';
 import { type Event, type Line, type Meta, Reader, type Usage, readMeta } from '../src/rollout';
 import { type Turn, Turns, mintedAt } from '../src/turns';
 import { CONTENT, fixture, fixtureLines, payloadOf } from './helpers';
@@ -293,6 +293,57 @@ describe('a response’s tokens', () => {
       ['gpt-5.5-codex', 100],
       ['gpt-5.5-codex', 50],
     ]);
+  });
+});
+
+describe('a turn of more calls than a run holds', () => {
+  it('is a run of its earliest, ending as the turn did', () => {
+    const meta: Meta = { threadId: 't', sessionId: 't', created: at(0), derived: false, ownFrom: undefined, provider: 'openai' };
+    let place = 0;
+    const line = (event: Event): Line => ({ start: place, end: ++place, time: at(1) + place, ordinal: undefined, event });
+    const turns = new Turns(meta, new Set(), undefined, { offset: 0, countKey: undefined, model: 'gpt-5.5-codex' });
+    const lines = [line({ kind: 'start', turnId: 'turn' })];
+    // Each call its own response: the model asks, the tool answers.
+    for (let index = 0; index < MAX_CALLS / 2 + 25; index++) {
+      lines.push(line({ kind: 'call', callId: `c${index}`, name: 'exec_command', inPlace: false, outcome: undefined }));
+      lines.push(line({ kind: 'result', callId: `c${index}` }));
+    }
+    lines.push(line({ kind: 'complete', turnId: 'turn', errorType: undefined }));
+    const [closed] = lines.flatMap((each) => turns.push(each));
+    expect(closed!.responses.length + closed!.calls.size).toBe(MAX_CALLS + 50);
+    const run = recordOf(closed!, { sessionId: 's', provider: 'openai', model: undefined })!;
+    const starts = [...closed!.responses.map((each) => each.start), ...[...closed!.calls.values()].map((each) => each.start)];
+    expect((run.inside ?? []).map((item) => Number(item.start))).toEqual(starts.sort((a, b) => a - b).slice(0, MAX_CALLS));
+    expect(run.end).toBe(at(1) + place);
+  });
+});
+
+describe('a name past ingest’s caps', () => {
+  it('is cut to them by character, never inside one: a tool’s to 128, a model’s to fit `chat` and it in 128', () => {
+    const meta: Meta = { threadId: 't', sessionId: 't', created: at(0), derived: false, ownFrom: undefined, provider: 'openai' };
+    // An astral character straddles each cap, two UTF-16 units that must not be parted.
+    const model = `${'m'.repeat(122)}😀${'m'.repeat(40)}`;
+    const tool = `mcp__${'s'.repeat(60)}__${'t'.repeat(60)}😀😀${'t'.repeat(40)}`;
+    let place = 0;
+    const line = (event: Event): Line => ({ start: place, end: ++place, time: at(1) + place, ordinal: undefined, event });
+    const turns = new Turns(meta, new Set(), undefined, { offset: 0, countKey: undefined, model });
+    const [turn] = [
+      line({ kind: 'start', turnId: 'turn' }),
+      line({ kind: 'call', callId: 'c1', name: tool, inPlace: false, outcome: undefined }),
+      line({ kind: 'result', callId: 'c1' }),
+      line({ kind: 'complete', turnId: 'turn', errorType: undefined }),
+    ].flatMap((each) => turns.push(each));
+    const run = recordOf(turn!, { sessionId: 's', provider: 'openai', model: undefined })!;
+    const [call] = modelCalls(run);
+    const [used] = toolCalls(run);
+    expect([...call!.model]).toHaveLength(123);
+    expect(call!.model.endsWith('😀')).toBe(true);
+    expect([...`chat ${call!.model}`]).toHaveLength(128);
+    expect([...used!.name]).toHaveLength(128);
+    expect(used!.name.endsWith('😀')).toBe(true);
+    expect(`${call!.model}${used!.name}`).not.toMatch(/\p{Cs}/u);
+    // A name within the caps is sent whole.
+    expect(modelCalls(runsOf('paginated')[0]!).map((each) => each.model)).toEqual(['gpt-5.5-codex', 'gpt-5.5-codex', 'gpt-5.5-codex']);
   });
 });
 

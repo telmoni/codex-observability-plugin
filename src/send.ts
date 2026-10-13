@@ -7,8 +7,17 @@
 import { Telmoni } from 'telmoni';
 import type { RunRecord } from 'telmoni';
 
-/** How long one turn's export may take, its retries included. */
+import { MAX_CALLS } from './record.js';
+
+/** How long one turn's export may take, its retries included; and each export more, past its first. */
 const FLUSH_SECONDS = 45;
+const FLUSH_SECONDS_PER_EXPORT = 15;
+/** The SDK's own batch: well inside ingest's caps on an export, 1,000 spans and a mebibyte. */
+const BATCH_SPANS = 512;
+/** A record is queued whole: the run, its start and every call, past the SDK's own 2,048. */
+const QUEUE_SPANS = MAX_CALLS + 2;
+/** How the SDK opens a warning of what the platform answered of an export it took, rather than of one it could not deliver. */
+const ANSWERED = 'telmoni: the server ';
 
 export interface Destination {
   endpoint: string | undefined;
@@ -24,16 +33,21 @@ export class Sender {
     this.#log = log;
     this.#telmoni = new Telmoni(
       { endpoint: destination.endpoint, apiKey: destination.apiKey },
-      { warn: (message) => void this.#warnings.push(message) },
+      {
+        warn: (message) => void this.#warnings.push(message),
+        processor: { maxQueueSize: QUEUE_SPANS, maxBatchSize: BATCH_SPANS },
+      },
     );
   }
 
   /**
    * Whether the platform took the turn. The SDK warns of every export it
-   * could not deliver and every span refused, and its warnings never carry a
-   * session's content, so a turn counts as taken when its flush settles with
-   * no warning. A record the SDK refuses counts as done: it would be refused
-   * again on every hook, and must not hold up the turns after it.
+   * could not deliver, and of all the platform answered it did not keep, and
+   * its warnings never carry a session's content. A turn counts as taken
+   * once its flush settles with no warning but the platform's own answer — a
+   * span refused, an attribute dropped — which the same bytes would get on
+   * every hook: it is logged, and, as a record the SDK refuses, must not hold
+   * up the turns after it.
    */
   async send(record: RunRecord): Promise<boolean> {
     try {
@@ -42,10 +56,21 @@ export class Sender {
       this.#log(`turn refused by the SDK: ${error instanceof Error ? error.name : typeof error}`);
       return true;
     }
-    const flushed = await this.#telmoni.flush(FLUSH_SECONDS);
-    if (flushed && this.#warnings.length === 0) return true;
-    this.#log(flushed ? `not sent: ${this.#warnings.join('; ')}` : 'not sent: the export did not finish in time');
-    return false;
+    const exports = Math.ceil(((record.inside?.length ?? 0) + 2) / BATCH_SPANS);
+    const flushed = await this.#telmoni.flush(FLUSH_SECONDS + (exports - 1) * FLUSH_SECONDS_PER_EXPORT);
+    // This turn's alone: the warnings of a turn taken before it are not its own.
+    const warnings = this.#warnings.splice(0);
+    if (!flushed) {
+      this.#log('not sent: the export did not finish in time');
+      return false;
+    }
+    const failures = warnings.filter((warning) => !warning.startsWith(ANSWERED));
+    if (failures.length > 0) {
+      this.#log(`not sent: ${failures.join('; ')}`);
+      return false;
+    }
+    if (warnings.length > 0) this.#log(`taken, but ${warnings.join('; ')}`);
+    return true;
   }
 
   close(): Promise<void> {

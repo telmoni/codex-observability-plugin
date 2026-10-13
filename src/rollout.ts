@@ -105,13 +105,14 @@ function idOf(value: unknown): string | undefined {
   return typeof value === 'string' && ID.test(value) ? value : undefined;
 }
 
-const CONTROL = /[\u0000-\u001f\u007f]/;
+/** A control character, or half of a character: a lone surrogate is no text ingest can decode, and it refuses the whole export holding one. */
+const UNNAMEABLE = /[\u0000-\u001f\u007f]|\p{Cs}/u;
 
-/** A name: a model's, a tool's, a server's. Never longer than a name runs, never with a control character in it. */
+/** A name: a model's, a tool's, a server's. Never longer than a name runs, never with a control character or a lone surrogate in it. */
 export function nameOf(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const name = value.trim();
-  return name !== '' && name.length <= 256 && !CONTROL.test(name) ? name : undefined;
+  return name !== '' && name.length <= 256 && !UNNAMEABLE.test(name) ? name : undefined;
 }
 
 const KIND = /^[a-z][a-z0-9_]{0,63}$/;
@@ -141,13 +142,30 @@ function errorTypeOf(value: unknown): string | undefined {
   return kindOf(info) ?? (keys.length === 1 ? kindOf(keys[0]) : undefined) ?? 'other';
 }
 
+/**
+ * A count, as far as a number holds one exactly: no count Codex makes runs
+ * past it, and one past 10^21 would go out in exponent form, which ingest
+ * refuses with the whole export.
+ */
 function count(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.trunc(value) : 0;
+  return typeof value === 'number' && value > 0 && value <= Number.MAX_SAFE_INTEGER ? Math.trunc(value) : 0;
 }
+
+/**
+ * The latest time read as one: past it, a time and a duration after it
+ * would overflow the 64 bits of nanoseconds OTLP counts in, and ingest would
+ * refuse the whole export on every hook.
+ */
+const LATEST_MS = Date.UTC(2200, 0, 1);
 
 /** Milliseconds since the epoch; Codex writes 0 where it does not know. */
 function msOf(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
+  return typeof value === 'number' && value > 0 && value <= LATEST_MS ? value : undefined;
+}
+
+/** An RFC 3339 time as Codex writes one, in milliseconds since the epoch. */
+function timeOf(value: unknown): number | undefined {
+  return typeof value === 'string' ? msOf(Date.parse(value)) : undefined;
 }
 
 /** A Rust `Duration` as serde writes it, `{"secs", "nanos"}`, in milliseconds. */
@@ -155,8 +173,9 @@ function durationOf(value: unknown): number | undefined {
   const duration = fieldsOf(value);
   if (duration === undefined) return undefined;
   const { secs, nanos } = duration;
-  if (typeof secs !== 'number' || !Number.isFinite(secs) || secs < 0) return undefined;
-  return secs * 1000 + (typeof nanos === 'number' && Number.isFinite(nanos) && nanos > 0 ? nanos / 1e6 : 0);
+  if (typeof secs !== 'number' || !(secs >= 0)) return undefined;
+  const ms = secs * 1000 + (typeof nanos === 'number' && nanos > 0 && nanos < 1e9 ? nanos / 1e6 : 0);
+  return ms <= LATEST_MS ? ms : undefined;
 }
 
 function usageOf(value: unknown): Usage | undefined {
@@ -378,7 +397,6 @@ function messageEvent(message: Fields): Event {
 function metaOf(meta: Fields): Event {
   const threadId = idOf(meta['id']);
   if (threadId === undefined) return OTHER;
-  const created = typeof meta['timestamp'] === 'string' ? Date.parse(meta['timestamp']) : Number.NaN;
   const ownFrom = meta['subagent_history_start_ordinal'];
   const present = (value: unknown): boolean => value !== null && value !== undefined;
   return {
@@ -386,7 +404,7 @@ function metaOf(meta: Fields): Event {
     meta: {
       threadId,
       sessionId: idOf(meta['session_id']) ?? threadId,
-      created: Number.isFinite(created) ? created : undefined,
+      created: timeOf(meta['timestamp']),
       derived:
         present(meta['forked_from_id']) ||
         present(meta['parent_thread_id']) ||
@@ -429,12 +447,11 @@ function lineOf(bytes: Buffer, start: number, end: number): Line {
     record = undefined;
   }
   if (record === undefined) return { start, end, time: undefined, ordinal: undefined, event: OTHER };
-  const time = typeof record['timestamp'] === 'string' ? Date.parse(record['timestamp']) : Number.NaN;
   const ordinal = record['ordinal'];
   return {
     start,
     end,
-    time: Number.isFinite(time) ? time : undefined,
+    time: timeOf(record['timestamp']),
     ordinal: Number.isSafeInteger(ordinal) && (ordinal as number) >= 0 ? (ordinal as number) : undefined,
     event: recordEvent(record),
   };

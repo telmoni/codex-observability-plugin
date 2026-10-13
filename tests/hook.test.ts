@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { runIdOf } from '../src/record';
 import { readMeta } from '../src/rollout';
-import { CONTENT, FakeIngest, attributesOf, fixture, fixtureLines, payloadOf, tempDir } from './helpers';
+import { CONTENT, FakeIngest, attributesOf, fixture, fixtureLines, payloadOf, refusalsIn, tempDir } from './helpers';
 
 const HOOK = fileURLToPath(new URL('../dist/hook.mjs', import.meta.url));
 
@@ -111,6 +111,32 @@ describe('the hook', () => {
     for (const text of [...CONTENT, home.path]) expect(bodies).not.toContain(text);
     const runs = ingest.spans().filter((span) => span.name === 'invoke_agent codex');
     expect(runs.map((span) => attributesOf(span)['telmoni.run_id'])).toEqual([runIdOf(session, turnId)]);
+    expect(refusalsIn(ingest.spans())).toEqual([]);
+    expect(existsSync(join(codex, 'telmoni', 'hook.log'))).toBe(false);
+  }, 30_000);
+
+  it('sends a name past ingest’s caps cut to them, so no span of the turn is refused', async () => {
+    const session = readMeta(fixture('paginated'))!.sessionId;
+    const codex = join(home.path, '.codex');
+    const rollout = rolloutIn(codex, session);
+    const server = 's'.repeat(150);
+    const model = 'm'.repeat(200);
+    writeFileSync(
+      rollout,
+      readFileSync(fixture('paginated'), 'utf8').replaceAll('mcp__docs__', `mcp__${server}__`).replaceAll('"docs"', `"${server}"`).replaceAll('gpt-5.5-codex', model),
+    );
+    const ran = await runHook(
+      { session_id: session, transcript_path: rollout, cwd: home.path, hook_event_name: 'SessionEnd', reason: 'other' },
+      { TELMONI_API_KEY: 'telmoni_test', TELMONI_ENDPOINT: endpoint },
+    );
+    expect(ran).toMatchObject({ code: 0, stdout: '', stderr: '' });
+    expect(await until(() => offsetOf(join(codex, 'telmoni', `${session}.json`)) === statSync(rollout).size, 20_000)).toBe(true);
+    const spans = ingest.spans();
+    expect(refusalsIn(spans)).toEqual([]);
+    const tools = spans.map((span) => attributesOf(span)['gen_ai.tool.name']).filter((name) => name !== undefined);
+    expect(tools).toContain(`mcp__${server}__search`.slice(0, 128));
+    const models = new Set(spans.map((span) => attributesOf(span)['gen_ai.request.model']).filter((name) => name !== undefined));
+    expect([...models]).toEqual([model.slice(0, 123)]);
     expect(existsSync(join(codex, 'telmoni', 'hook.log'))).toBe(false);
   }, 30_000);
 
@@ -129,6 +155,7 @@ describe('the hook', () => {
     expect(ran.ms).toBeLessThan(1500);
     expect(await until(() => offsetOf(join(codex, 'telmoni', `${session}.json`)) === statSync(rollout).size, 20_000)).toBe(true);
     expect(ingest.received).toHaveLength(4);
+    expect(refusalsIn(ingest.spans())).toEqual([]);
     expect(ingest.received.every((request) => request.headers['authorization'] === 'Bearer telmoni_test')).toBe(true);
     expect(existsSync(join(home.path, '.codex'))).toBe(false);
   }, 30_000);
