@@ -33,7 +33,7 @@ The Codex plugin for Telmoni ([`telmoni/codex-observability-plugin`](https://git
 - TypeScript on Node 22, bundled by tsup into the one file `dist/hook.mjs` with the SDK inside it: Codex installs the package with no install scripts and no dependencies. Nothing built is committed.
 - Everything that leaves goes through the SDK's `recordRun`, never a request of the plugin's own: the contract, the content rules and the retries are the SDK's.
 - A rollout's fields are read in `src/rollout.ts` alone, each by name, and only where it is metadata: nothing reads a line's text, arguments or output, not even for an exit code.
-- Comments say *why*, never *what*. No AI signatures anywhere.
+- Comments are for a person reading the code, and short: they say *why*, never *what* — a doc comment in a line or two, an inline comment in one, a test's doc in one line on what it proves. The reasoning behind a change (a race worked through, the designs turned down, its history) goes in `ARCHITECTURE.md` or the commit message, never above a function, and editing a comment means shortening its whole block. No AI signatures anywhere.
 - Never log a key, a token or anything read from a session; log kinds.
 
 ## Agent Hygiene
