@@ -1,6 +1,6 @@
 # Telmoni for Codex — Agent Guidelines
 
-The Codex plugin for Telmoni ([`telmoni/codex-observability-plugin`](https://github.com/telmoni/codex-observability-plugin)): a hook that records each turn of a person's Codex sessions as a run, metadata only, through the TypeScript SDK of the platform ([`telmoni/telmoni`](https://github.com/telmoni/telmoni), `sdk/typescript`). It reaches a person's machine as the npm package `@telmoni/codex-observability-plugin` alone, which this repository's marketplace, `telmoni-plugins`, names. The repository is public, and every file in it is published as written.
+The Codex plugin for Telmoni ([`telmoni/codex-observability-plugin`](https://github.com/telmoni/codex-observability-plugin)): a hook that records each turn of a person's Codex sessions as a run, metadata only, through the TypeScript SDK of the platform ([`telmoni/telmoni`](https://github.com/telmoni/telmoni), `sdk/typescript`). It reaches a person's machine as the npm package `@telmoni/codex-observability-plugin` alone, which the marketplace `telmoni-plugins` names, in [`telmoni/plugins`](https://github.com/telmoni/plugins). The repository is public, and every file in it is published as written.
 
 ## Ground Rules
 - **Pre-launch:** nothing has shipped. Change the record, the state and the manifests to their ideal state; no migration paths.
@@ -20,10 +20,10 @@ The Codex plugin for Telmoni ([`telmoni/codex-observability-plugin`](https://git
 | `src/send.ts`, `src/state.ts`, `src/settings.ts`, `src/input.ts`, `src/log.ts` | Sending through the SDK; each thread's state and lock; the key, endpoint and folder; the hook's input; `hook.log`. |
 | `tests/` | The suites; `tests/fixtures/` holds synthetic rollouts, every text in them fake, its `README.md` saying how they were made. |
 | `.codex-plugin/plugin.json`, `hooks/hooks.json` | The plugin, shipped in the package: its manifest and its four hooks. |
-| `.agents/plugins/marketplace.json` | The marketplace, `telmoni-plugins`, naming the npm package; added sparse, so an install never fetches `src/` or `tests/`. |
 | `ARCHITECTURE.md` | How the plugin works, and why. |
 | [`telmoni/telmoni`](https://github.com/telmoni/telmoni) | Sibling repo, checked out as `../telmoni`: the SDK this plugin is built on (`sdk/typescript`, `recordRun`), which it takes from npm as `telmoni`. |
 | [`telmoni/docs`](https://github.com/telmoni/docs) | Sibling repo, checked out as `../docs`: the book, whose `api/coding-agents.mdx` documents this plugin. |
+| [`telmoni/plugins`](https://github.com/telmoni/plugins) | Sibling repo, checked out as `../plugins`: the marketplace, `telmoni-plugins`, naming this plugin by its npm package. |
 
 ## Commands
 - **After every change** (no permission needed; report failures verbatim): `make check` — the types, the bundle and the suites (`npm run verify`), the manifests and the package among them, since Codex ships no validator for either.
