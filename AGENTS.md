@@ -27,7 +27,7 @@ The Codex plugin for Telmoni ([`telmoni/codex-observability-plugin`](https://git
 
 ## Commands
 - **After every change** (no permission needed; report failures verbatim): `make check` — the types, the bundle and the suites (`npm run verify`), the manifests and the package among them, since Codex ships no validator for either.
-- **Locally:** `node dist/hook.mjs`, a hook's input on its stdin, runs the hook as Codex does. To run it inside Codex before the package is published, build, copy what the package holds (`.codex-plugin/`, `hooks/`, `dist/`, `package.json`) into a folder inside a marketplace of your own, name it there as a local source (`{"source": "local", "path": "./…"}` — Codex takes only a `./` path inside the marketplace's folder), and add the plugin from there. Codex copies a local plugin whole into its cache as it is added, so add it again after each build; its hooks want trusting in `/hooks`, as any do.
+- **Locally:** `node dist/hook.mjs`, a hook's input on its stdin, runs the hook as Codex does. To run a checkout's build inside Codex, build, copy what the package holds (`.codex-plugin/`, `hooks/`, `dist/`, `package.json`) into a folder inside a marketplace of your own, name it there as a local source (`{"source": "local", "path": "./…"}` — Codex takes only a `./` path inside the marketplace's folder), and add the plugin from there. Codex copies a local plugin whole into its cache as it is added, so add it again after each build; its hooks want trusting in `/hooks`, as any do.
 
 ## Code Rules
 - TypeScript on Node 22, bundled by tsup into the one file `dist/hook.mjs` with the SDK inside it: Codex installs the package with no install scripts and no dependencies. Nothing built is committed.
