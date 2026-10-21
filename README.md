@@ -7,11 +7,11 @@ Records each turn of your [Codex](https://developers.openai.com/codex) sessions 
 You need Codex 0.143 or later, git, and Node.js 22 or later with npm on your `PATH`: Codex adds the marketplace with your git, fetches the plugin's npm package with your npm, and the hook runs on your Node.
 
 ```sh
-codex plugin marketplace add telmoni/plugins
+codex plugin marketplace add telmoni/codex-observability-plugin
 codex plugin add telmoni-observability@telmoni-plugins
 ```
 
-The marketplace is Telmoni's catalog, [`telmoni/plugins`](https://github.com/telmoni/plugins), which names each plugin by its npm package: this one is [`@telmoni/codex-observability-plugin`](https://www.npmjs.com/package/@telmoni/codex-observability-plugin), its built hook alone, so an install never fetches this repository's `src/` or `tests/`. Adding it enables it in `~/.codex/config.toml`:
+This repository is the marketplace, and it names the plugin by its npm package, [`@telmoni/codex-observability-plugin`](https://www.npmjs.com/package/@telmoni/codex-observability-plugin): Codex clones the repository for the catalog and fetches the hook as built from npm, never from the clone. Adding the plugin enables it in `~/.codex/config.toml`:
 
 ```toml
 [plugins."telmoni-observability@telmoni-plugins"]

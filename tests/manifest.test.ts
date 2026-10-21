@@ -1,6 +1,6 @@
 /**
  * The manifests, held to what Codex reads: Codex ships no validator for a
- * plugin, so the suites check them.
+ * plugin or a marketplace, so the suites check them.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -19,15 +19,26 @@ function json(path: string): Record<string, unknown> {
 
 const pkg = json('package.json');
 const plugin = json('.codex-plugin/plugin.json');
+const marketplace = json('.agents/plugins/marketplace.json');
 const hooks = json('hooks/hooks.json');
 
 describe('the plugin', () => {
-  it('is named as telmoni/plugins lists it, never as the skill is, and versioned as its package', () => {
+  it('is named as its marketplace lists it, never as the skill is, and versioned as its package', () => {
     expect(plugin['name']).toBe('telmoni-observability');
     expect(plugin['version']).toBe(pkg['version']);
     expect(plugin['hooks']).toBe('./hooks/hooks.json');
     const display = (plugin['interface'] as Record<string, unknown>)['displayName'];
     expect(display).toBe('Telmoni Observability');
+    const plugins = marketplace['plugins'] as Array<Record<string, unknown>>;
+    expect(marketplace['name']).toBe('telmoni-plugins');
+    expect(plugins).toEqual([
+      expect.objectContaining({
+        name: plugin['name'],
+        source: { source: 'npm', package: pkg['name'] },
+        policy: expect.objectContaining({ installation: 'AVAILABLE' }) as unknown,
+        category: expect.any(String) as unknown,
+      }),
+    ]);
   });
 
   it('runs one hook at Stop, SubagentStop, Interrupt and SessionEnd, inside each event’s time', () => {
