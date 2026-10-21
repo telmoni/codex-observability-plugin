@@ -1,6 +1,6 @@
 # Telmoni for Codex — Agent Guidelines
 
-The Codex plugin for Telmoni ([`telmoni/codex-observability-plugin`](https://github.com/telmoni/codex-observability-plugin)): a hook that records each turn of a person's Codex sessions as a run, metadata only, through the TypeScript SDK of the platform ([`telmoni/telmoni`](https://github.com/telmoni/telmoni), `sdk/typescript`). It reaches a person's machine as the npm package `telmoni-codex-observability-plugin` alone, which this repository's marketplace, `telmoni-plugins`, names. The repository is public, and every file in it is published as written.
+The Codex plugin for Telmoni ([`telmoni/codex-observability-plugin`](https://github.com/telmoni/codex-observability-plugin)): a hook that records each turn of a person's Codex sessions as a run, metadata only, through the TypeScript SDK of the platform ([`telmoni/telmoni`](https://github.com/telmoni/telmoni), `sdk/typescript`). It reaches a person's machine as the npm package `@telmoni/codex-observability-plugin` alone, which this repository's marketplace, `telmoni-plugins`, names. The repository is public, and every file in it is published as written.
 
 ## Ground Rules
 - **Pre-launch:** nothing has shipped. Change the record, the state and the manifests to their ideal state; no migration paths.
@@ -22,11 +22,11 @@ The Codex plugin for Telmoni ([`telmoni/codex-observability-plugin`](https://git
 | `.codex-plugin/plugin.json`, `hooks/hooks.json` | The plugin, shipped in the package: its manifest and its four hooks. |
 | `.agents/plugins/marketplace.json` | The marketplace, `telmoni-plugins`, naming the npm package; added sparse, so an install never fetches `src/` or `tests/`. |
 | `ARCHITECTURE.md` | How the plugin works, and why. |
-| [`telmoni/telmoni`](https://github.com/telmoni/telmoni) | Sibling repo, checked out as `../telmoni`: the SDK this plugin is built on (`sdk/typescript`, `recordRun`), linked by path until the SDKs are published. |
+| [`telmoni/telmoni`](https://github.com/telmoni/telmoni) | Sibling repo, checked out as `../telmoni`: the SDK this plugin is built on (`sdk/typescript`, `recordRun`), which it takes from npm as `telmoni`. |
 | [`telmoni/docs`](https://github.com/telmoni/docs) | Sibling repo, checked out as `../docs`: the book, whose `api/coding-agents.mdx` documents this plugin. |
 
 ## Commands
-- **After every change** (no permission needed; report failures verbatim): `make check` — the types, the bundle and the suites (`npm run verify`), the manifests and the package among them, since Codex ships no validator for either. The suites need `../telmoni/sdk/typescript` built (`npm run build` there).
+- **After every change** (no permission needed; report failures verbatim): `make check` — the types, the bundle and the suites (`npm run verify`), the manifests and the package among them, since Codex ships no validator for either.
 - **Locally:** `node dist/hook.mjs`, a hook's input on its stdin, runs the hook as Codex does. To run it inside Codex before the package is published, build, copy what the package holds (`.codex-plugin/`, `hooks/`, `dist/`, `package.json`) into a folder inside a marketplace of your own, name it there as a local source (`{"source": "local", "path": "./…"}` — Codex takes only a `./` path inside the marketplace's folder), and add the plugin from there. Codex copies a local plugin whole into its cache as it is added, so add it again after each build; its hooks want trusting in `/hooks`, as any do.
 
 ## Code Rules

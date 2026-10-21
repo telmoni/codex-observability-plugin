@@ -4,8 +4,6 @@ Records each turn of your [Codex](https://developers.openai.com/codex) sessions 
 
 ## Install
 
-The plugin is not on npm yet, so the install below waits for its package; until then, run it [from a checkout](#from-a-checkout).
-
 You need Codex 0.143 or later, git, and Node.js 22 or later with npm on your `PATH`: Codex adds the marketplace with your git, fetches the plugin's npm package with your npm, and the hook runs on your Node.
 
 ```sh
@@ -13,7 +11,7 @@ codex plugin marketplace add telmoni/codex-observability-plugin --sparse .agents
 codex plugin add telmoni-observability@telmoni-plugins
 ```
 
-The marketplace is added sparse, so only its manifest and the repository's root files are fetched, never `src/` or `tests/`; the plugin itself is the npm package `telmoni-codex-observability-plugin`, its built hook alone. Adding it enables it in `~/.codex/config.toml`:
+The marketplace is added sparse, so only its manifest and the repository's root files are fetched, never `src/` or `tests/`; the plugin itself is the npm package [`@telmoni/codex-observability-plugin`](https://www.npmjs.com/package/@telmoni/codex-observability-plugin), its built hook alone. Adding it enables it in `~/.codex/config.toml`:
 
 ```toml
 [plugins."telmoni-observability@telmoni-plugins"]
@@ -24,12 +22,10 @@ Hooks are on in Codex by default; `hooks = false` under `[features]` is what tur
 
 ### From a checkout
 
-Build the plugin beside a checkout of [`telmoni/telmoni`](https://github.com/telmoni/telmoni), whose TypeScript SDK it is built on:
+Build the plugin:
 
 ```sh
-git clone https://github.com/telmoni/telmoni.git
 git clone https://github.com/telmoni/codex-observability-plugin.git
-(cd telmoni/sdk/typescript && npm install && npm run build)
 (cd codex-observability-plugin && npm install && npm run build)
 ```
 

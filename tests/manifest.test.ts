@@ -63,7 +63,7 @@ describe('the plugin', () => {
 
 describe('the package', () => {
   it('is the plugin as built and nothing else, with nothing to install and no script to run', () => {
-    expect(pkg['name']).toBe('telmoni-codex-observability-plugin');
+    expect(pkg['name']).toBe('@telmoni/codex-observability-plugin');
     expect(pkg['files']).toEqual(['.codex-plugin/plugin.json', 'hooks', 'dist']);
     expect(pkg['dependencies']).toBeUndefined();
     const scripts = pkg['scripts'] as Record<string, string>;

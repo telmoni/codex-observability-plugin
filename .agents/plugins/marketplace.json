@@ -8,7 +8,7 @@
       "name": "telmoni-observability",
       "source": {
         "source": "npm",
-        "package": "telmoni-codex-observability-plugin"
+        "package": "@telmoni/codex-observability-plugin"
       },
       "policy": {
         "installation": "AVAILABLE",
