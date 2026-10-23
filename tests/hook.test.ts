@@ -197,7 +197,10 @@ describe('the hook', () => {
     );
     expect(ran).toMatchObject({ code: 0, stdout: '', stderr: '' });
     const log = join(codex, 'telmoni', 'hook.log');
-    expect(await until(() => existsSync(log), 20_000)).toBe(true);
+    const state = join(codex, 'telmoni', `${session}.json`);
+    const lock = join(codex, 'telmoni', `${session}.lock`);
+    // The copy is done once it has saved its place and let go of its lock, both after its line in the log.
+    expect(await until(() => existsSync(state) && !existsSync(lock), 20_000)).toBe(true);
     const written = readFileSync(log, 'utf8');
     expect(written).toMatch(/^\S+ SessionEnd [0-9a-f]{8}: not sent: telmoni: export refused with 403 \/errors\/authz\/forbidden; the batch was dropped\n$/);
     for (const text of [...CONTENT, home.path, 'telmoni_test', endpoint]) expect(written).not.toContain(text);
@@ -214,10 +217,13 @@ describe('the hook', () => {
     writeFileSync(rollout, readFileSync(fixture('legacy')));
     const input = { session_id: session, transcript_path: rollout, cwd: home.path, hook_event_name: 'SessionEnd', reason: 'other' };
     const log = join(codex, 'telmoni', 'hook.log');
+    const state = join(codex, 'telmoni', `${session}.json`);
     expect(await runHook(input, {})).toMatchObject({ code: 0, stdout: '' });
-    expect(await until(() => existsSync(log), 10_000)).toBe(true);
+    // Saved after its line in the log, it is what tells the next hook the line was logged.
+    expect(await until(() => existsSync(state), 10_000)).toBe(true);
     expect(await runHook(input, {})).toMatchObject({ code: 0, stdout: '' });
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    // Whatever the second copy logs is in by its exit, which Linux's `/proc` alone shows.
+    if (process.platform === 'linux') expect(await until(() => copiesOf(session).length === 0, 10_000)).toBe(true);
     const written = readFileSync(log, 'utf8');
     expect(written.trim().split('\n')).toHaveLength(1);
     expect(written).toMatch(/SessionEnd [0-9a-f]{8}: no key/);

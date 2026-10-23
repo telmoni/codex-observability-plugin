@@ -5,10 +5,9 @@
  * sending the same turns at once.
  */
 
+import { randomUUID } from 'node:crypto';
 import {
-  closeSync,
   mkdirSync,
-  openSync,
   readFileSync,
   readdirSync,
   renameSync,
@@ -105,30 +104,31 @@ export function writeState(dir: string, name: string, state: ThreadState): void 
 
 /** A lock not freshened for this long was left by a hook that died holding it. */
 const STALE_MS = 60_000;
-/** How often a working hook freshens its lock. */
-const FRESHEN_MS = 10_000;
 
 /**
- * Holds the thread's lock while `work` runs, waiting up to `waitMs` for a
- * hook already holding it; false, and `work` not run, if it never comes free.
+ * Holds the thread's lock while `work` runs, waiting up to `waitMs` for it; false, `work` not run, if it never comes free.
+ * `staleMs`, how long an untouched lock stands, is the tests' to shorten.
  */
 export async function withLock(
   dir: string,
   name: string,
   waitMs: number,
   work: () => Promise<void>,
+  staleMs = STALE_MS,
 ): Promise<boolean> {
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const path = join(dir, `${name}.lock`);
+  // Written into the lock, so a hook lets go of its own and never of one another hook took from it after a sleep of the machine.
+  const token = `${process.pid}:${randomUUID()}`;
   const deadline = Date.now() + waitMs;
   for (;;) {
     try {
-      closeSync(openSync(path, 'wx', 0o600));
+      writeFileSync(path, token, { flag: 'wx', mode: 0o600 });
       break;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
       try {
-        if (Date.now() - statSync(path).mtimeMs > STALE_MS) rmSync(path, { force: true });
+        if (Date.now() - statSync(path).mtimeMs > staleMs) rmSync(path, { force: true });
       } catch {
         // Freed between the two calls.
       }
@@ -136,23 +136,25 @@ export async function withLock(
       await sleep(200);
     }
   }
-  // A hook can hold its lock for minutes — waiting on a turn's last line,
-  // catching up on a long rollout — so it keeps the lock fresh while it
-  // works, and only a dead hook's goes stale.
+  // Kept fresh while held, every ten seconds by default, so only a dead hook's lock goes stale however long it waits.
   const freshen = setInterval(() => {
     try {
       const now = new Date();
       utimesSync(path, now, now);
     } catch {
-      // Taken as stale by another hook; this one finishes regardless.
+      // Taken away: the release below leaves it alone.
     }
-  }, FRESHEN_MS);
+  }, staleMs / 6);
   freshen.unref();
   try {
     await work();
   } finally {
     clearInterval(freshen);
-    rmSync(path, { force: true });
+    try {
+      if (readFileSync(path, 'utf8') === token) rmSync(path, { force: true });
+    } catch {
+      // Gone already.
+    }
   }
   return true;
 }

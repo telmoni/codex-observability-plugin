@@ -149,7 +149,7 @@ async function readLocked(
     return true;
   };
   const target = input.turnId;
-  // What the hook says of the turn it names, whatever closes it in the rollout.
+  // What the hook says of the turn it names, where no closing line of the turn's own says otherwise.
   const named: Ending = input.event === 'Interrupt' ? 'interrupted' : 'stopped';
   const quietMs = target === undefined ? 0 : (deps.closeWaitMs ?? CLOSE_WAIT_MS);
   let news = Date.now();

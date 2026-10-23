@@ -83,7 +83,7 @@ describe('the package', () => {
     expect(packed.files.map((file) => file.path).sort()).toEqual(
       ['.codex-plugin/plugin.json', 'LICENSE', 'README.md', 'dist/hook.mjs', 'hooks/hooks.json', 'package.json'].sort(),
     );
-    // npm takes seconds to start, more while the hook's own suites run beside it.
+    // npm takes seconds to start.
   }, 30_000);
 
   it('bundles the hook into one file that needs nothing but Node', () => {

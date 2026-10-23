@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { RunRecord } from 'telmoni';
@@ -573,5 +573,49 @@ describe('the lock', () => {
     mkdirSync(lockDir, { recursive: true });
     writeFileSync(join(lockDir, `${SESSION}.lock`), '');
     expect(await withLock(lockDir, SESSION, 300, async () => undefined)).toBe(false);
+  });
+
+  it('is taken from a hook that died, once a minute untouched', async () => {
+    const lockDir = join(dir.path, 'locks');
+    const lock = join(lockDir, `${SESSION}.lock`);
+    mkdirSync(lockDir, { recursive: true });
+    writeFileSync(lock, 'a hook that died');
+    const untouched = new Date(Date.now() - 2 * 60_000);
+    utimesSync(lock, untouched, untouched);
+    expect(await withLock(lockDir, SESSION, 1000, async () => undefined)).toBe(true);
+    expect(existsSync(lock)).toBe(false);
+  });
+
+  it('is never taken for a dead hook’s while its hook works on past the time that takes', async () => {
+    const lockDir = join(dir.path, 'locks');
+    const order: string[] = [];
+    const staleMs = 1_000;
+    const first = withLock(
+      lockDir,
+      SESSION,
+      1000,
+      async () => {
+        order.push('first in');
+        await new Promise((resolve) => setTimeout(resolve, staleMs * 3));
+        order.push('first out');
+      },
+      staleMs,
+    );
+    // Taken as `withLock` was called, before its first wait.
+    expect(order).toEqual(['first in']);
+    const second = withLock(lockDir, SESSION, staleMs * 6, async () => void order.push('second'), staleMs);
+    expect(await first).toBe(true);
+    expect(await second).toBe(true);
+    expect(order).toEqual(['first in', 'first out', 'second']);
+  });
+
+  it('leaves in place a lock another hook took from it', async () => {
+    const lockDir = join(dir.path, 'locks');
+    const lock = join(lockDir, `${SESSION}.lock`);
+    await withLock(lockDir, SESSION, 1000, async () => {
+      // Another hook, finding this one's lock stale, took it.
+      writeFileSync(lock, 'another hook');
+    });
+    expect(readFileSync(lock, 'utf8')).toBe('another hook');
   });
 });

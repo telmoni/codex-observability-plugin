@@ -9,11 +9,18 @@ import type { RunRecord } from 'telmoni';
 
 import { MAX_CALLS } from './record.js';
 
-/** How long one turn's export may take, its retries included; and each export more, past its first. */
-const FLUSH_SECONDS = 45;
-const FLUSH_SECONDS_PER_EXPORT = 15;
-/** The SDK's own batch: well inside ingest's caps on an export, 1,000 spans and a mebibyte. */
+/** The SDK's batch, which it sends one at a time: well inside ingest's caps on an export, 1,000 spans and a mebibyte. */
 const BATCH_SPANS = 512;
+/** How often the SDK tries a batch before it drops it; it exports none of the limits restated here. */
+const ATTEMPTS = 3;
+/** How long the SDK gives each attempt. */
+const ATTEMPT_SECONDS = 10;
+/** The longest `Retry-After` the SDK waits out between two attempts. */
+const RETRY_AFTER_SECONDS = 60;
+/** A batch's worst case, 150 seconds: every attempt timed out, with the longest wait between each two. */
+const BATCH_SECONDS = ATTEMPTS * ATTEMPT_SECONDS + (ATTEMPTS - 1) * RETRY_AFTER_SECONDS;
+/** Beyond the batches' worst case, so a turn's flush ends on the platform's answer rather than before it. */
+const FLUSH_MARGIN_SECONDS = 30;
 /** A record is queued whole: the run, its start and every call, past the SDK's own 2,048. */
 const QUEUE_SPANS = MAX_CALLS + 2;
 /** How the SDK opens a warning of what the platform answered of an export it took, rather than of one it could not deliver. */
@@ -56,8 +63,8 @@ export class Sender {
       this.#log(`turn refused by the SDK: ${error instanceof Error ? error.name : typeof error}`);
       return true;
     }
-    const exports = Math.ceil(((record.inside?.length ?? 0) + 2) / BATCH_SPANS);
-    const flushed = await this.#telmoni.flush(FLUSH_SECONDS + (exports - 1) * FLUSH_SECONDS_PER_EXPORT);
+    const batches = Math.ceil(((record.inside?.length ?? 0) + 2) / BATCH_SPANS);
+    const flushed = await this.#telmoni.flush(FLUSH_MARGIN_SECONDS + batches * BATCH_SECONDS);
     // This turn's alone: the warnings of a turn taken before it are not its own.
     const warnings = this.#warnings.splice(0);
     if (!flushed) {
