@@ -45,6 +45,8 @@ export interface ThreadState {
   opening?: Opening;
   /** Whether a missing key has been logged for this thread, so it is logged once. */
   warnedNoKey?: boolean;
+  /** Whether an endpoint the SDK refused has been logged for this thread, so it is logged once. */
+  warnedEndpoint?: boolean;
 }
 
 /** The sent turns kept: a session's whole history, but for the longest ever run. */
@@ -86,6 +88,7 @@ export function readState(dir: string, name: string): ThreadState {
       state.opening = { at: opening.at as number, turnId: opening.turnId };
     }
     if (parsed.warnedNoKey === true) state.warnedNoKey = true;
+    if (parsed.warnedEndpoint === true) state.warnedEndpoint = true;
     return state;
   } catch {
     return { offset: 0 };

@@ -508,6 +508,23 @@ describe('a turn sent again', () => {
     expect(bodies().map((body) => (JSON.parse(body) as { resourceSpans: unknown[] }).resourceSpans.length)).toHaveLength(5);
     expect(readState(settings.dir, SESSION).offset).toBe(readFileSync(path).length);
   }, 30_000);
+
+  it('after the SDK refused its endpoint, is sent once the endpoint is one it takes, the refusal logged once in its words', async () => {
+    const path = writtenThrough(paginated.length);
+    const reachable = settings.endpoint;
+    // Plain HTTP to another machine would carry the key in the clear.
+    settings.endpoint = 'http://telmoni.example';
+    await hook('SessionEnd', path, undefined, real);
+    await hook('SessionEnd', path, undefined, real);
+    expect(logged).toEqual([
+      "endpoint refused by the SDK (refusing to send the API key over unencrypted HTTP to 'telmoni.example'; use HTTPS): put another in ~/.codex/telmoni.json, or TELMONI_ENDPOINT; nothing is sent until then",
+    ]);
+    expect(readState(settings.dir, SESSION).offset).toBe(0);
+    settings.endpoint = reachable;
+    await hook('SessionEnd', path, undefined, real);
+    expect(bodies()).toHaveLength(5);
+    expect(readState(settings.dir, SESSION).offset).toBe(readFileSync(path).length);
+  });
 });
 
 describe('what a hook keeps', () => {
@@ -516,12 +533,16 @@ describe('what a hook keeps', () => {
     await hook('Stop', path, F);
     settings.apiKey = undefined;
     await hook('Stop', path, F);
+    settings.apiKey = 'telmoni_test';
+    settings.endpoint = 'http://telmoni.example';
+    await hook('Stop', path, F, { sender: (destination) => new Sender(destination, (line) => void logged.push(line)) });
     const files = readdirSync(settings.dir);
     expect(files.sort()).toEqual([`${SESSION}.json`]);
     const kept = readFileSync(join(settings.dir, `${SESSION}.json`), 'utf8');
-    const allowed = ['countKey', 'ino', 'model', 'offset', 'opening', 'path', 'sent', 'warnedNoKey'];
+    const allowed = ['countKey', 'ino', 'model', 'offset', 'opening', 'path', 'sent', 'warnedEndpoint', 'warnedNoKey'];
     expect(Object.keys(JSON.parse(kept) as object).filter((key) => !allowed.includes(key))).toEqual([]);
-    for (const text of CONTENT) expect(kept).not.toContain(text);
+    expect(JSON.parse(kept)).toMatchObject({ warnedEndpoint: true, warnedNoKey: true });
+    for (const text of [...CONTENT, 'telmoni.example']) expect(kept).not.toContain(text);
     if (process.platform !== 'win32') {
       expect(statSync(settings.dir).mode & 0o777).toBe(0o700);
       expect(statSync(join(settings.dir, `${SESSION}.json`)).mode & 0o777).toBe(0o600);

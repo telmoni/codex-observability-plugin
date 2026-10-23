@@ -231,6 +231,26 @@ describe('the hook', () => {
     expect(ingest.received).toEqual([]);
   }, 30_000);
 
+  it('sends nothing to an endpoint the SDK refuses, and names it in its log once, in the SDK’s words', async () => {
+    const session = readMeta(fixture('legacy'))!.sessionId;
+    const codex = join(home.path, '.codex');
+    const rollout = rolloutIn(codex, session);
+    writeFileSync(rollout, readFileSync(fixture('legacy')));
+    const input = { session_id: session, transcript_path: rollout, cwd: home.path, hook_event_name: 'SessionEnd', reason: 'other' };
+    const env = { TELMONI_API_KEY: 'telmoni_test', TELMONI_ENDPOINT: 'http://telmoni.example' };
+    const log = join(codex, 'telmoni', 'hook.log');
+    const state = join(codex, 'telmoni', `${session}.json`);
+    expect(await runHook(input, env)).toMatchObject({ code: 0, stdout: '' });
+    expect(await until(() => existsSync(state), 10_000)).toBe(true);
+    expect(await runHook(input, env)).toMatchObject({ code: 0, stdout: '' });
+    if (process.platform === 'linux') expect(await until(() => copiesOf(session).length === 0, 10_000)).toBe(true);
+    const written = readFileSync(log, 'utf8');
+    expect(written.trim().split('\n')).toHaveLength(1);
+    expect(written).toMatch(/SessionEnd [0-9a-f]{8}: endpoint refused by the SDK \(refusing to send the API key over unencrypted HTTP to 'telmoni\.example'; use HTTPS\)/);
+    for (const text of [...CONTENT, home.path, 'telmoni_test']) expect(written).not.toContain(text);
+    expect(ingest.received).toEqual([]);
+  }, 30_000);
+
   it('exits 0 at its own deadline, printing nothing, where its stdin is never closed', async () => {
     const started = Date.now();
     const ran = await new Promise<Ran & { signal: NodeJS.Signals | null }>((resolve, reject) => {

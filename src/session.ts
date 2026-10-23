@@ -44,20 +44,34 @@ const SAVE_EVERY_MS = 1_000;
 
 type Send = (record: RunRecord) => Promise<boolean>;
 
+/** Logs `line` once a thread, remembered in its state as `flag`. */
+function logOnce(dir: string, name: string, flag: 'warnedNoKey' | 'warnedEndpoint', line: string, log: Deps['log']): void {
+  const state = readState(dir, name);
+  if (state[flag] === true) return;
+  log(line);
+  writeState(dir, name, { ...state, [flag]: true });
+}
+
 export async function sync(input: HookInput, settings: Settings, deps: Deps): Promise<void> {
   if (input.rolloutPath === undefined) return;
+  const name = stateName(input.sessionId, input.threadId);
   const { apiKey } = settings;
   if (apiKey === undefined) {
-    const name = stateName(input.sessionId, input.threadId);
-    const state = readState(settings.dir, name);
-    if (!state.warnedNoKey) {
-      deps.log('no key: put it in ~/.codex/telmoni.json, or TELMONI_API_KEY; nothing is sent until then');
-      writeState(settings.dir, name, { ...state, warnedNoKey: true });
-    }
+    const line = 'no key: put it in ~/.codex/telmoni.json, or TELMONI_API_KEY; nothing is sent until then';
+    logOnce(settings.dir, name, 'warnedNoKey', line, deps.log);
     return;
   }
-  let sender: ReturnType<Deps['sender']> | undefined;
-  const send: Send = (record) => (sender ??= deps.sender({ endpoint: settings.endpoint, apiKey })).send(record);
+  let sender: ReturnType<Deps['sender']>;
+  try {
+    sender = deps.sender({ endpoint: settings.endpoint, apiKey });
+  } catch (error) {
+    // The SDK's refusal names the endpoint's host at most, never a path, a key or anything of the session.
+    if (!(error instanceof TypeError)) throw error;
+    const line = `endpoint refused by the SDK (${error.message}): put another in ~/.codex/telmoni.json, or TELMONI_ENDPOINT`;
+    logOnce(settings.dir, name, 'warnedEndpoint', `${line}; nothing is sent until then`, deps.log);
+    return;
+  }
+  const send: Send = (record) => sender.send(record);
   try {
     if (!(await readThread(input, input.rolloutPath, settings, deps, send))) return;
     if (input.event !== 'SessionEnd') return;
@@ -69,7 +83,7 @@ export async function sync(input: HookInput, settings: Settings, deps: Deps): Pr
       if (!(await readThread(subagent, path, settings, deps, send))) return;
     }
   } finally {
-    await sender?.close();
+    await sender.close();
   }
 }
 
@@ -130,6 +144,7 @@ async function readLocked(
     if (at.model !== undefined) next.model = at.model;
     if (at.opening !== undefined) next.opening = at.opening;
     if (state.warnedNoKey) next.warnedNoKey = true;
+    if (state.warnedEndpoint) next.warnedEndpoint = true;
     writeState(settings.dir, name, next);
     saved = Date.now();
   };
