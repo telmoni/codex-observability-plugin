@@ -1,6 +1,6 @@
 {
   "name": "telmoni-observability",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Records each turn of your Codex sessions in Telmoni as a run: the models, their tokens, the tools and the times. Never a prompt, a reply, a thought, a tool's input or output, or a path.",
   "author": {
     "name": "Telmoni",
