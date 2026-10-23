@@ -4,7 +4,7 @@ Records each turn of your [Codex](https://developers.openai.com/codex) sessions 
 
 ## Install
 
-You need Codex 0.143 or later, git, and Node.js 22 or later with npm on your `PATH`: Codex adds the marketplace with your git, fetches the plugin's npm package with your npm, and the hook runs on your Node.
+You need Codex 0.143 or later, git, and Node.js 22.23.4, 24.22.1, 26.12.1 or later (October 2026's security releases) with npm on your `PATH`: Codex adds the marketplace with your git, fetches the plugin's npm package with your npm, and the hook runs on your Node.
 
 ```sh
 codex plugin marketplace add telmoni/codex-observability-plugin
