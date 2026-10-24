@@ -78,7 +78,11 @@ try {
     if (input !== undefined) {
       const tag = `${input.event} ${input.threadId.slice(0, 8)}:`;
       const write = (line: string): void => log(settings.dir, `${tag} ${line}`);
-      await sync(input, settings, { sender: (destination) => new Sender(destination, write), log: write });
+      try {
+        await sync(input, settings, { sender: (destination) => new Sender(destination, write), log: write });
+      } catch (error) {
+        write(`failed: ${kindOf(error)}`);
+      }
     }
   }
 } catch (error) {

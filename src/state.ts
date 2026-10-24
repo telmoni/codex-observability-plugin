@@ -7,7 +7,10 @@
 
 import { randomUUID } from 'node:crypto';
 import {
+  closeSync,
+  fsyncSync,
   mkdirSync,
+  openSync,
   readFileSync,
   readdirSync,
   renameSync,
@@ -73,35 +76,46 @@ export function subagentsOf(dir: string, sessionId: string): string[] {
     .sort();
 }
 
+/** A thread's state: afresh only where none was saved, since one read as new would send the thread again from the top. */
 export function readState(dir: string, name: string): ThreadState {
+  let text: string;
   try {
-    const parsed = JSON.parse(readFileSync(join(dir, `${name}.json`), 'utf8')) as Partial<Record<keyof ThreadState, unknown>>;
-    const offset = parsed.offset;
-    const state: ThreadState = { offset: Number.isSafeInteger(offset) && (offset as number) >= 0 ? (offset as number) : 0 };
-    if (typeof parsed.path === 'string') state.path = parsed.path;
-    if (Number.isSafeInteger(parsed.ino) && (parsed.ino as number) > 0) state.ino = parsed.ino as number;
-    if (Array.isArray(parsed.sent)) state.sent = parsed.sent.filter((id): id is string => typeof id === 'string');
-    if (typeof parsed.countKey === 'string') state.countKey = parsed.countKey;
-    if (typeof parsed.model === 'string') state.model = parsed.model;
-    const opening = parsed.opening as Partial<Record<keyof Opening, unknown>> | null | undefined;
-    if (Number.isSafeInteger(opening?.at) && (opening?.at as number) >= 0 && typeof opening?.turnId === 'string') {
-      state.opening = { at: opening.at as number, turnId: opening.turnId };
-    }
-    if (parsed.warnedNoKey === true) state.warnedNoKey = true;
-    if (parsed.warnedEndpoint === true) state.warnedEndpoint = true;
-    return state;
-  } catch {
-    return { offset: 0 };
+    text = readFileSync(join(dir, `${name}.json`), 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { offset: 0 };
+    throw error;
   }
+  const value: unknown = JSON.parse(text);
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('thread state is not an object');
+  const parsed = value as Partial<Record<keyof ThreadState, unknown>>;
+  const offset = parsed.offset;
+  const state: ThreadState = { offset: Number.isSafeInteger(offset) && (offset as number) >= 0 ? (offset as number) : 0 };
+  if (typeof parsed.path === 'string') state.path = parsed.path;
+  if (Number.isSafeInteger(parsed.ino) && (parsed.ino as number) > 0) state.ino = parsed.ino as number;
+  if (Array.isArray(parsed.sent)) state.sent = parsed.sent.filter((id): id is string => typeof id === 'string');
+  if (typeof parsed.countKey === 'string') state.countKey = parsed.countKey;
+  if (typeof parsed.model === 'string') state.model = parsed.model;
+  const opening = parsed.opening as Partial<Record<keyof Opening, unknown>> | null | undefined;
+  if (Number.isSafeInteger(opening?.at) && (opening?.at as number) >= 0 && typeof opening?.turnId === 'string') {
+    state.opening = { at: opening.at as number, turnId: opening.turnId };
+  }
+  if (parsed.warnedNoKey === true) state.warnedNoKey = true;
+  if (parsed.warnedEndpoint === true) state.warnedEndpoint = true;
+  return state;
 }
 
 export function writeState(dir: string, name: string, state: ThreadState): void {
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const path = join(dir, `${name}.json`);
   const kept = state.sent === undefined ? state : { ...state, sent: state.sent.slice(-MAX_SENT) };
-  // Written aside and renamed over, so a hook killed mid-write leaves the
-  // last state whole rather than half of the new one.
-  writeFileSync(`${path}.tmp`, JSON.stringify(kept), { mode: 0o600 });
+  // Synced aside, then renamed over: a hook killed, or a machine stopped, mid-write leaves the last state whole.
+  const fd = openSync(`${path}.tmp`, 'w', 0o600);
+  try {
+    writeFileSync(fd, JSON.stringify(kept));
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
   renameSync(`${path}.tmp`, path);
 }
 

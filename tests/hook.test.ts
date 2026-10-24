@@ -251,6 +251,26 @@ describe('the hook', () => {
     expect(ingest.received).toEqual([]);
   }, 30_000);
 
+  it('logs a state it cannot read under its thread, and leaves the state and the turns alone', async () => {
+    const session = readMeta(fixture('legacy'))!.sessionId;
+    const codex = join(home.path, '.codex');
+    const rollout = rolloutIn(codex, session);
+    writeFileSync(rollout, readFileSync(fixture('legacy')));
+    const kept = join(codex, 'telmoni');
+    mkdirSync(kept, { recursive: true, mode: 0o700 });
+    // Torn as no hook leaves one, since each syncs its state before renaming it over the last.
+    writeFileSync(join(kept, `${session}.json`), '{"offset":', { mode: 0o600 });
+    const input = { session_id: session, transcript_path: rollout, cwd: home.path, hook_event_name: 'SessionEnd', reason: 'other' };
+    expect(await runHook(input, { TELMONI_API_KEY: 'telmoni_test', TELMONI_ENDPOINT: endpoint })).toMatchObject({ code: 0, stdout: '' });
+    const log = join(kept, 'hook.log');
+    // The line is the copy's last write.
+    expect(await until(() => existsSync(log) && readFileSync(log, 'utf8').endsWith('\n'), 20_000)).toBe(true);
+    if (process.platform === 'linux') expect(await until(() => copiesOf(session).length === 0, 10_000)).toBe(true);
+    expect(readFileSync(log, 'utf8')).toMatch(/^\S+ SessionEnd [0-9a-f]{8}: failed: SyntaxError\n$/);
+    expect(readFileSync(join(kept, `${session}.json`), 'utf8')).toBe('{"offset":');
+    expect(ingest.received).toEqual([]);
+  }, 30_000);
+
   it('exits 0 at its own deadline, printing nothing, where its stdin is never closed', async () => {
     const started = Date.now();
     const ran = await new Promise<Ran & { signal: NodeJS.Signals | null }>((resolve, reject) => {

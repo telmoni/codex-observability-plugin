@@ -550,6 +550,29 @@ describe('what a hook keeps', () => {
   });
 });
 
+describe('the state', () => {
+  it('starts afresh only where none was saved, and throws on one it cannot read rather than send the thread again', () => {
+    expect(readState(settings.dir, SESSION)).toEqual({ offset: 0 });
+    mkdirSync(settings.dir, { recursive: true });
+    for (const unreadable of ['{"offset":', '', 'null', '[]']) {
+      writeFileSync(join(settings.dir, `${SESSION}.json`), unreadable);
+      expect(() => readState(settings.dir, SESSION)).toThrow();
+    }
+  });
+
+  it('that cannot be read stops the hook, left as it is and its lock let go, the turns waiting until it is gone', async () => {
+    const path = writtenThrough(paginated.length);
+    mkdirSync(settings.dir, { recursive: true });
+    writeFileSync(join(settings.dir, `${SESSION}.json`), '{"offset":');
+    await expect(hook('Stop', path, F)).rejects.toThrow(SyntaxError);
+    expect(sent).toEqual([]);
+    expect(readFileSync(join(settings.dir, `${SESSION}.json`), 'utf8')).toBe('{"offset":');
+    rmSync(join(settings.dir, `${SESSION}.json`));
+    await hook('Stop', path, F);
+    expect(sent.map((run) => run.runId)).toEqual(runIds(A, B, C, E, F));
+  });
+});
+
 describe('two hooks of a thread at once', () => {
   it('send each turn once between them', async () => {
     const path = writtenThrough(paginated.length);
