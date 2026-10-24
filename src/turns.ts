@@ -1,21 +1,6 @@
 /**
- * A rollout cut into turns, each of the thread's own gathered as far as its
- * run goes.
- *
- * A turn opens at `task_started` and closes at its `task_complete` or
- * `turn_aborted`, or at the next turn's opening where Codex died before
- * writing either; nothing outside a turn opens one. Inside a turn, the
- * model's output — its reasoning, its replies, its calls — is a response
- * until what went back to it, a tool's answer or a prompt, seals it, so the
- * next output is the next response. A response's tokens are Codex's record
- * of it (`token_usage_record`, one per response), or else, in a legacy
- * rollout, the last share of a running total that is new and reads true.
- *
- * A turn is the thread's own unless its rollout copied it from another: a
- * paginated subagent's records before its own history's first ordinal are
- * its parent's, and a forked or spawned thread's rollout may begin with its
- * source's turns, whose ids — version 7 UUIDs, minted as each turn began —
- * are older than the thread itself. A turn already sent is passed over too.
+ * A rollout cut into turns — `task_started` to `task_complete`, `turn_aborted` or the next opening — each of the
+ * thread's own gathered into responses, sealed by what went back to the model, and tool calls; a copied or sent turn is passed over.
  */
 
 import type { Line, Meta, Opening, Outcome, Usage } from './rollout.js';
@@ -185,8 +170,7 @@ export class Turns {
   #close(turnId: string | undefined, closing: NonNullable<Turn['closing']>): Turn[] {
     const current = this.#current;
     if (current === undefined) return [];
-    // A closing for another turn — one closed already, or a source's turn a
-    // fork's rollout ends — leaves this one open.
+    // A closing for another turn — one closed already, or a source's turn a fork's rollout ends — leaves this one open.
     if (turnId !== undefined && turnId !== current.turn.id) return [];
     const turn = current.turn;
     if (closing.at !== undefined) turn.last = Math.max(turn.last ?? closing.at, closing.at);
@@ -249,9 +233,7 @@ export class Turns {
           if (this.#responseIds.has(event.responseId)) break;
           this.#responseIds.add(event.responseId);
         }
-        // Written as its response completed, before any of its tools ran: it
-        // is the open response's, or, with none open, a call of its own, as a
-        // compaction's is.
+        // Written as its response completed, before its tools ran: the open response's, else a call of its own, as a compaction's is.
         const open = turn.responses.at(-1);
         const response = open !== undefined && !open.sealed && open.recorded === undefined ? open : this.#begin(turn, time, true);
         if (response === undefined) break;
@@ -262,8 +244,7 @@ export class Turns {
       }
       case 'count': {
         if (!fresh || event.usage === undefined) break;
-        // Written once the response's tools had run, so it is the latest
-        // response's, whatever followed it, unless that has its share.
+        // Written once the response's tools had run: the latest response's, whatever followed, unless that has its share.
         const last = turn.responses.at(-1);
         const response = last !== undefined && last.counted === undefined ? last : this.#begin(turn, time, true);
         if (response !== undefined) response.counted = event.usage;

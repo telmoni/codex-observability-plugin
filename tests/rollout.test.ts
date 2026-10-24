@@ -57,8 +57,7 @@ describe('a rollout', () => {
 
   it('never reads what lies before its offset, however far into the file', () => {
     const path = join(dir.path, 'rollout.jsonl');
-    // Three gibibytes of nothing on disk, with no newline in them: read from
-    // the start, they would take seconds and come out as one line too long.
+    // Three gibibytes of nothing with no newline: read from the start they would take seconds and come out as one line too long.
     const offset = 3 * 1024 ** 3;
     const fd = openSync(path, 'w');
     try {

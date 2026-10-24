@@ -1,8 +1,6 @@
 /**
- * What has been sent of each thread — `<session_id>.json` in the plugin's
- * folder for a session's own thread, `<session_id>.<thread_id>.json` for a
- * subagent's beside it — and the lock that keeps two hooks of one thread from
- * sending the same turns at once.
+ * What has been sent of each thread — `<session_id>.json` for a session's own thread, `<session_id>.<thread_id>.json`
+ * for a subagent's beside it — and the lock that keeps two hooks of one thread from sending the same turns at once.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -29,9 +27,8 @@ export interface ThreadState {
   /** Where in the rollout the first turn not yet sent begins, in bytes. */
   offset: number;
   /**
-   * The rollout the offset is into, and its file's identity: a thread moved
-   * to a new rollout, or a rollout replaced where it lies, is read again
-   * from its start, and `sent` keeps what was sent from being sent again.
+   * The rollout the offset is into, and its file's identity: a thread moved to a new rollout, or a rollout replaced
+   * where it lies, is read again from its start, and `sent` keeps what was sent from being sent again.
    */
   path?: string;
   ino?: number;
@@ -48,6 +45,8 @@ export interface ThreadState {
   opening?: Opening;
   /** Whether a missing key has been logged for this thread, so it is logged once. */
   warnedNoKey?: boolean;
+  /** Whether a key file passed over has been logged for this thread, so it is logged once. */
+  warnedKeyFile?: boolean;
   /** Whether an endpoint the SDK refused has been logged for this thread, so it is logged once. */
   warnedEndpoint?: boolean;
 }
@@ -100,6 +99,7 @@ export function readState(dir: string, name: string): ThreadState {
     state.opening = { at: opening.at as number, turnId: opening.turnId };
   }
   if (parsed.warnedNoKey === true) state.warnedNoKey = true;
+  if (parsed.warnedKeyFile === true) state.warnedKeyFile = true;
   if (parsed.warnedEndpoint === true) state.warnedEndpoint = true;
   return state;
 }
@@ -109,14 +109,16 @@ export function writeState(dir: string, name: string, state: ThreadState): void 
   const path = join(dir, `${name}.json`);
   const kept = state.sent === undefined ? state : { ...state, sent: state.sent.slice(-MAX_SENT) };
   // Synced aside, then renamed over: a hook killed, or a machine stopped, mid-write leaves the last state whole.
-  const fd = openSync(`${path}.tmp`, 'w', 0o600);
+  // Its own, so a hook that took a stale lock in the same instant as another never writes into this one's.
+  const temporary = `${path}.${process.pid}.tmp`;
+  const fd = openSync(temporary, 'w', 0o600);
   try {
     writeFileSync(fd, JSON.stringify(kept));
     fsyncSync(fd);
   } finally {
     closeSync(fd);
   }
-  renameSync(`${path}.tmp`, path);
+  renameSync(temporary, path);
 }
 
 /** A lock not freshened for this long was left by a hook that died holding it. */

@@ -2,7 +2,7 @@
 
 import { isAbsolute } from 'node:path';
 
-import { nameOf } from './rollout.js';
+import { fieldsOf, nameOf } from './rollout.js';
 
 export type HookEvent = 'Stop' | 'SubagentStop' | 'Interrupt' | 'SessionEnd';
 
@@ -31,10 +31,6 @@ export function isId(value: unknown): value is string {
   return typeof value === 'string' && ID.test(value);
 }
 
-function fieldsOf(raw: unknown): Record<string, unknown> {
-  return raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
-}
-
 function checked(candidate: Record<keyof HookInput, unknown>): HookInput | undefined {
   const { event, sessionId, threadId, rolloutPath, turnId, model } = candidate;
   if (typeof event !== 'string' || !EVENTS.has(event as HookEvent)) return undefined;
@@ -55,12 +51,11 @@ function checked(candidate: Record<keyof HookInput, unknown>): HookInput | undef
 }
 
 /**
- * Codex's own input. A subagent's hook names the session's rollout as
- * `transcript_path` and the subagent's own as `agent_transcript_path`, the
- * one its turn is in.
+ * Codex's own input. A subagent's hook names the session's rollout as `transcript_path` and the subagent's own, the one
+ * its turn is in, as `agent_transcript_path`.
  */
 export function inputFrom(raw: unknown): HookInput | undefined {
-  const fields = fieldsOf(raw);
+  const fields = fieldsOf(raw) ?? {};
   const subagent = fields['hook_event_name'] === 'SubagentStop';
   return checked({
     event: fields['hook_event_name'],
@@ -74,7 +69,7 @@ export function inputFrom(raw: unknown): HookInput | undefined {
 
 /** The input as the hook hands it to its detached copy, checked again there. */
 export function handedOff(raw: unknown): HookInput | undefined {
-  const fields = fieldsOf(raw);
+  const fields = fieldsOf(raw) ?? {};
   return checked({
     event: fields['event'],
     sessionId: fields['sessionId'],

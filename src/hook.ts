@@ -1,11 +1,6 @@
 /**
- * The hook Codex runs at `Stop`, `SubagentStop`, `Interrupt` and `SessionEnd`.
- *
- * It reads what Codex hands it, starts a detached copy of itself with that,
- * and exits at once with nothing on stdout: the session never waits on the
- * network, a Telmoni that does not answer never slows it, and Codex reads
- * nothing from this hook it could take as a decision. The copy waits for the
- * turn's closing line, then sends what has ended (`session.ts`).
+ * The hook Codex runs at `Stop`, `SubagentStop`, `Interrupt` and `SessionEnd`: it hands what it is given to a detached
+ * copy of itself and exits at once with nothing on stdout, which Codex could take as a decision; the copy sends (`session.ts`).
  */
 
 import { spawn } from 'node:child_process';
@@ -28,10 +23,9 @@ function readStdin(): Promise<string> {
     const chunks: Buffer[] = [];
     let size = 0;
     const timer = setTimeout(() => {
-      // A stdin left open would hold the process, and the session with it,
-      // until Codex killed the hook at its timeout.
+      // A stdin left open would hold the process, and the session with it, until Codex killed the hook at its timeout.
       process.stdin.destroy();
-      reject(new Error('no hook input'));
+      reject(Object.assign(new Error('no hook input'), { name: 'NoHookInput' }));
     }, INPUT_WAIT_MS);
     process.stdin.on('data', (chunk: Buffer) => {
       size += chunk.length;
@@ -54,10 +48,13 @@ function readStdin(): Promise<string> {
   });
 }
 
-const settings = settingsFrom(process.env);
 const handed = process.env[HANDOFF];
+// Set once the settings are read: a hook that cannot read them has nowhere to say so.
+let dir: string | undefined;
 
 try {
+  const settings = settingsFrom(process.env);
+  dir = settings.dir;
   if (handed === undefined) {
     const input = inputFrom(JSON.parse(await readStdin()));
     if (input === undefined) {
@@ -86,7 +83,7 @@ try {
     }
   }
 } catch (error) {
-  log(settings.dir, `failed: ${kindOf(error)}`);
+  if (dir !== undefined) log(dir, `failed: ${kindOf(error)}`);
 }
 // Nothing the session could see: whatever happened is in hook.log.
 process.exitCode = 0;

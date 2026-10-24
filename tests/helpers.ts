@@ -54,6 +54,8 @@ export interface Answer {
   status: number;
   /** A partial success, as ingest words one: `span <id> refused: <why>`, `span <id> dropped <attribute>: <reason>`. */
   partial?: string;
+  /** A refusal's problem type, its whole message as ingest words one with no detail. */
+  type?: string;
 }
 
 /** Ingest as the SDK meets it: an OTLP/JSON lane that keeps what it is sent, or answers `status`. */
@@ -77,7 +79,7 @@ export class FakeIngest {
           response.end(JSON.stringify({ partialSuccess: partial }));
         } else {
           response.writeHead(answer.status, { 'Content-Type': 'application/json' });
-          response.end(JSON.stringify({ code: 7, message: '/errors/authz/forbidden: this API key does not hold the ingest scope' }));
+          response.end(JSON.stringify({ code: 7, message: answer.type ?? '/errors/authz/forbidden: this API key does not hold the ingest scope' }));
         }
       });
     });
@@ -112,11 +114,7 @@ const U64_MAX = 2n ** 64n - 1n;
 const I64_MAX = 2n ** 63n - 1n;
 const characters = (text: string): number => [...text].length;
 
-/**
- * Why ingest would refuse each span it was sent, by the rules it reads a
- * span by (`crates/telemetry/src/ingest/span.rs` in telmoni/telmoni): a span
- * refused is refused on every hook, so a plugin may send none.
- */
+/** Why ingest would refuse each span, by the rules it reads one by (`crates/telemetry/src/ingest/span.rs` in telmoni/telmoni): a span refused is refused on every hook. */
 export function refusalsIn(spans: JsonSpan[]): string[] {
   return spans.flatMap((span) => {
     const why = refusalOf(span);
@@ -169,7 +167,7 @@ function refusalOf(span: JsonSpan): string | undefined {
         ? (text('gen_ai.tool.name') ?? span.name)
         : span.name;
   if (name === '') return 'name is empty';
-  if (characters(name) > 128) return 'name past its cap';
+  if (characters(name) > 145) return 'name past its cap';
   const time = (nanos: string): bigint | undefined => (/^\d+$/.test(nanos) && BigInt(nanos) > 0n && BigInt(nanos) <= U64_MAX ? BigInt(nanos) : undefined);
   const start = time(span.startTimeUnixNano);
   const end = time(span.endTimeUnixNano);

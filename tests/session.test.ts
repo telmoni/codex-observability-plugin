@@ -10,7 +10,7 @@ import { readMeta } from '../src/rollout';
 import { Sender } from '../src/send';
 import { type Deps, sync } from '../src/session';
 import type { Settings } from '../src/settings';
-import { readState, stateName, withLock, writeState } from '../src/state';
+import { readState, stateName, subagentsOf, withLock, writeState } from '../src/state';
 import { CONTENT, FakeIngest, fixture, fixtureLines, payloadOf, tempDir } from './helpers';
 
 let dir: { path: string; remove: () => void };
@@ -21,7 +21,7 @@ let logged: string[];
 
 beforeEach(() => {
   dir = tempDir();
-  settings = { apiKey: 'telmoni_test', endpoint: undefined, dir: join(dir.path, 'telmoni') };
+  settings = { apiKey: 'telmoni_test', endpoint: undefined, dir: join(dir.path, 'telmoni'), keyFileName: '~/.codex/telmoni.json' };
   sent = [];
   answers = [];
   logged = [];
@@ -390,6 +390,84 @@ describe('a hook', () => {
     expect(logged[0]).toMatch(/^no key/);
   });
 
+  it('logs a missing key only under the thread’s lock, so no hook’s save is written over', async () => {
+    const path = writtenThrough(paginated.length);
+    let entered: () => void = () => undefined;
+    let release: () => void = () => undefined;
+    const inside = new Promise<void>((resolve) => (entered = resolve));
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const holder = withLock(settings.dir, SESSION, 1000, async () => {
+      entered();
+      await held;
+    });
+    await inside;
+    settings.apiKey = undefined;
+    await hook('Stop', path, F, { lockWaitMs: 10 });
+    expect(logged).toEqual([]);
+    release();
+    await holder;
+    await hook('Stop', path, F);
+    expect(logged).toEqual([expect.stringMatching(/^no key/) as unknown]);
+  });
+
+  it('waits on no lock to say again what it said already', async () => {
+    const path = writtenThrough(paginated.length);
+    settings.apiKey = undefined;
+    await hook('Stop', path, F);
+    let entered: () => void = () => undefined;
+    let release: () => void = () => undefined;
+    const inside = new Promise<void>((resolve) => (entered = resolve));
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const holder = withLock(settings.dir, SESSION, 1000, async () => {
+      entered();
+      await held;
+    });
+    await inside;
+    await hook('Stop', path, F, { lockWaitMs: 60_000 });
+    release();
+    await holder;
+    expect(logged).toEqual([expect.stringMatching(/^no key/) as unknown]);
+  });
+
+  it('sends nothing past a key file it passed over, though the key is in its environment, and says why once', async () => {
+    // The file may have named a self-hosted endpoint: the key must not go to the default instead.
+    settings.keyFileProblem = 'open to other users; chmod 600 it';
+    settings.keyFileName = '$CODEX_HOME/telmoni.json';
+    await hook('Stop', writtenThrough(paginated.length), F);
+    await hook('Stop', writtenThrough(paginated.length), F);
+    expect(sent).toEqual([]);
+    expect(logged).toEqual(['$CODEX_HOME/telmoni.json not used (open to other users; chmod 600 it): fix it, or set both TELMONI_API_KEY and TELMONI_ENDPOINT; nothing is sent until then']);
+  });
+
+  it('says each reason once a thread, though turns are sent and saved between', async () => {
+    const path = writtenThrough(paginated.length);
+    const problem = 'open to other users; chmod 600 it';
+    settings.apiKey = undefined;
+    await hook('Stop', path, F);
+    settings.keyFileProblem = problem;
+    await hook('Stop', path, F);
+    delete settings.keyFileProblem;
+    settings.apiKey = 'telmoni_test';
+    await hook('Stop', path, F);
+    expect(sent.length).toBeGreaterThan(0);
+    settings.apiKey = undefined;
+    await hook('Stop', path, F);
+    settings.keyFileProblem = problem;
+    await hook('Stop', path, F);
+    expect(logged).toEqual([expect.stringMatching(/^no key/) as unknown, expect.stringMatching(/ not used \(/) as unknown]);
+  });
+
+  it('says once each why nothing is sent: no key, then a key file passed over', async () => {
+    const path = writtenThrough(paginated.length);
+    settings.apiKey = undefined;
+    await hook('Stop', path, F);
+    settings.keyFileProblem = 'open to other users; chmod 600 it';
+    await hook('Stop', path, F);
+    await hook('Stop', path, F);
+    expect(sent).toEqual([]);
+    expect(logged).toEqual([expect.stringMatching(/^no key/) as unknown, expect.stringMatching(/^~\/\.codex\/telmoni\.json not used \(open to other users/) as unknown]);
+  });
+
   it('says so where the turn a hook names never shows in its rollout, sending the turns that did end', async () => {
     await hook('Stop', writtenThrough(paginated.length), '01a12f99-0000-7000-8000-000000000000');
     expect(sent.map((run) => run.runId)).toEqual(runIds(A, B, C, E));
@@ -443,6 +521,36 @@ describe('a subagent', () => {
       [runIdOf(meta.sessionId, next), true],
     ]);
   });
+
+  it('stopped before there was a key, has its turns sent at the session’s end once there is one', async () => {
+    const path = writtenThrough(subagent.length, subagent);
+    settings.apiKey = undefined;
+    await hook('SubagentStop', path, own, {}, input);
+    expect(sent).toEqual([]);
+    settings.apiKey = 'telmoni_test';
+    const root = join(dir.path, 'root.jsonl');
+    writeFileSync(root, `${JSON.stringify({ timestamp: new Date(0).toISOString(), type: 'session_meta', payload: { id: meta.sessionId, timestamp: new Date(0).toISOString() } })}\n`);
+    await hook('SessionEnd', root, undefined, {}, { sessionId: meta.sessionId, threadId: meta.sessionId });
+    expect(sent.map((run) => run.runId)).toEqual([runIdOf(meta.sessionId, own)]);
+  });
+});
+
+describe('a subagent whose state cannot be read', () => {
+  it('is passed over at the session’s end, logged, and holds up neither the session’s turns nor another subagent’s', async () => {
+    const subagent = fixtureLines('subagent');
+    const meta = readMeta(fixture('subagent'))!;
+    const own = subagent.flatMap(({ record }) => (payloadOf(record)['type'] === 'task_started' ? [payloadOf(record)['turn_id'] as string] : [])).at(-1)!;
+    const path = writtenThrough(subagent.length, subagent);
+    mkdirSync(settings.dir, { recursive: true });
+    // Sorted before the subagent whose turn is still to send: a sweep that stopped at it would send nothing.
+    writeFileSync(join(settings.dir, `${meta.sessionId}.000torn.json`), '{"offset":');
+    writeState(settings.dir, stateName(meta.sessionId, meta.threadId), { offset: 0, path });
+    const root = join(dir.path, 'root.jsonl');
+    writeFileSync(root, `${JSON.stringify({ timestamp: new Date(0).toISOString(), type: 'session_meta', payload: { id: meta.sessionId, timestamp: new Date(0).toISOString() } })}\n`);
+    await hook('SessionEnd', root, undefined, {}, { sessionId: meta.sessionId, threadId: meta.sessionId });
+    expect(logged).toEqual(['subagent 000torn: state not read: SyntaxError']);
+    expect(sent.map((run) => run.runId)).toEqual([runIdOf(meta.sessionId, own)]);
+  });
 });
 
 describe('a fork', () => {
@@ -485,10 +593,10 @@ describe('a turn sent again', () => {
 
   it('after Telmoni refused it, then answered again, is the same bytes, and the turns after it follow', async () => {
     const path = writtenThrough(paginated.length);
-    ingest.answers.push({ status: 500 });
+    ingest.answers.push({ status: 401 });
     await hook('SessionEnd', path, undefined, real);
     expect(bodies()).toHaveLength(1);
-    expect(logged).toEqual([expect.stringMatching(/^not sent: telmoni: export refused with 500 /) as unknown]);
+    expect(logged).toEqual([expect.stringMatching(/^not sent: telmoni: export refused with 401 /) as unknown]);
     await hook('SessionEnd', path, undefined, real);
     const [tried, ...after] = bodies();
     expect(after).toHaveLength(5);
@@ -533,15 +641,18 @@ describe('what a hook keeps', () => {
     await hook('Stop', path, F);
     settings.apiKey = undefined;
     await hook('Stop', path, F);
+    settings.keyFileProblem = 'open to other users; chmod 600 it';
+    await hook('Stop', path, F);
+    delete settings.keyFileProblem;
     settings.apiKey = 'telmoni_test';
     settings.endpoint = 'http://telmoni.example';
     await hook('Stop', path, F, { sender: (destination) => new Sender(destination, (line) => void logged.push(line)) });
     const files = readdirSync(settings.dir);
     expect(files.sort()).toEqual([`${SESSION}.json`]);
     const kept = readFileSync(join(settings.dir, `${SESSION}.json`), 'utf8');
-    const allowed = ['countKey', 'ino', 'model', 'offset', 'opening', 'path', 'sent', 'warnedEndpoint', 'warnedNoKey'];
+    const allowed = ['countKey', 'ino', 'model', 'offset', 'opening', 'path', 'sent', 'warnedEndpoint', 'warnedKeyFile', 'warnedNoKey'];
     expect(Object.keys(JSON.parse(kept) as object).filter((key) => !allowed.includes(key))).toEqual([]);
-    expect(JSON.parse(kept)).toMatchObject({ warnedEndpoint: true, warnedNoKey: true });
+    expect(JSON.parse(kept)).toMatchObject({ warnedEndpoint: true, warnedKeyFile: true, warnedNoKey: true });
     for (const text of [...CONTENT, 'telmoni.example']) expect(kept).not.toContain(text);
     if (process.platform !== 'win32') {
       expect(statSync(settings.dir).mode & 0o777).toBe(0o700);
@@ -558,6 +669,30 @@ describe('the state', () => {
       writeFileSync(join(settings.dir, `${SESSION}.json`), unreadable);
       expect(() => readState(settings.dir, SESSION)).toThrow();
     }
+  });
+
+  it('keeps the newest sent turns, and only so many', () => {
+    writeState(settings.dir, SESSION, { offset: 0, sent: Array.from({ length: 5_005 }, (_, index) => `turn-${index}`) });
+    const { sent: kept } = readState(settings.dir, SESSION);
+    expect(kept).toHaveLength(5_000);
+    expect([kept![0], kept!.at(-1)]).toEqual(['turn-5', 'turn-5004']);
+  });
+
+  it('is written through a file named for its own process, leaving any other writer’s alone', () => {
+    mkdirSync(settings.dir, { recursive: true });
+    const others = [`${SESSION}.json.tmp`, `${SESSION}.json.${process.pid + 1}.tmp`].map((name) => join(settings.dir, name));
+    for (const other of others) writeFileSync(other, 'theirs');
+    writeState(settings.dir, SESSION, { offset: 7 });
+    expect(others.map((other) => readFileSync(other, 'utf8'))).toEqual(['theirs', 'theirs']);
+    expect(readState(settings.dir, SESSION)).toEqual({ offset: 7 });
+  });
+
+  it('names a session’s subagents by their own states alone, never a lock, a temporary file or another name', () => {
+    mkdirSync(settings.dir, { recursive: true });
+    for (const name of [`${SESSION}.json`, `${SESSION}.agent_1.json`, `${SESSION}.agent_1.lock`, `${SESSION}.agent_2.json.4242.tmp`, `${SESSION}.a.b.json`, 'other.agent_3.json']) {
+      writeFileSync(join(settings.dir, name), '{}');
+    }
+    expect(subagentsOf(settings.dir, SESSION)).toEqual(['agent_1']);
   });
 
   it('that cannot be read stops the hook, left as it is and its lock let go, the turns waiting until it is gone', async () => {
@@ -593,6 +728,31 @@ describe('two hooks of a thread at once', () => {
 });
 
 describe('the lock', () => {
+  it('is given up past its wait at a stop, which a later hook follows, and outwaited at the session’s end', async () => {
+    const path = writtenThrough(paginated.length);
+    let entered: () => void = () => undefined;
+    let release: () => void = () => undefined;
+    const inside = new Promise<void>((resolve) => (entered = resolve));
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const holder = withLock(settings.dir, SESSION, 1000, async () => {
+      entered();
+      await held;
+    });
+    await inside;
+    let ended = false;
+    const ending = hook('SessionEnd', path, undefined, { lockWaitMs: 10 }).then(() => {
+      ended = true;
+    });
+    await hook('Stop', path, F, { lockWaitMs: 10 });
+    expect(logged).toEqual(['busy: another hook of this thread held its lock past the wait; the next hook sends']);
+    // The stop gave up after the session's end began to wait, and that waits on.
+    expect(ended).toBe(false);
+    release();
+    await Promise.all([holder, ending]);
+    expect(sent.map((run) => run.runId)).toEqual(runIds(A, B, C, E, F));
+    expect(logged).toHaveLength(1);
+  });
+
   it('lets one hook of a thread work at a time, and is free once it is done', async () => {
     const lockDir = join(dir.path, 'locks');
     const order: string[] = [];

@@ -50,8 +50,7 @@ describe('the plugin', () => {
       expect(groups[0]!.matcher).toBeUndefined();
       const [handler, ...others] = groups[0]!.hooks;
       expect(others).toEqual([]);
-      // Codex substitutes ${PLUGIN_ROOT} itself, whatever the shell, and
-      // trusts the command as written: it never names a version.
+      // Codex substitutes ${PLUGIN_ROOT} itself, whatever the shell, and trusts the command as written: it never names a version.
       expect(handler).toMatchObject({ type: 'command', command: 'node "${PLUGIN_ROOT}/dist/hook.mjs"' });
       expect(handler!['async']).toBeUndefined();
       expect(handler!['timeout']).toBeGreaterThanOrEqual(1);
@@ -81,7 +80,7 @@ describe('the package', () => {
     // npm before 12 answers a list, npm 12 an object by the package's name.
     const packed = Array.isArray(output) ? output[0]! : Object.values(output)[0]!;
     expect(packed.files.map((file) => file.path).sort()).toEqual(
-      ['.codex-plugin/plugin.json', 'LICENSE', 'README.md', 'dist/hook.mjs', 'hooks/hooks.json', 'package.json'].sort(),
+      ['.codex-plugin/plugin.json', 'LICENSE', 'dist/hook.mjs', 'hooks/hooks.json', 'package.json'].sort(),
     );
     // npm takes seconds to start.
   }, 30_000);

@@ -1,8 +1,6 @@
 /**
- * One hook's work on one session: the turns of a thread that have ended since
- * the last hook sent, each sent as a run and the place after it saved, so a
- * turn is sent once and none is skipped. At the session's end, its
- * subagents' threads too.
+ * One hook's work on one session: the turns of a thread ended since the last hook sent, each sent as a run and the
+ * place after it saved, so a turn is sent once and none is skipped; at the session's end, its subagents' threads too.
  */
 
 import { statSync } from 'node:fs';
@@ -25,15 +23,13 @@ export interface Deps {
   /** How long a stopped turn's closing line is waited for with no news of the turn, and how often the rollout is looked at meanwhile. */
   closeWaitMs?: number;
   pollMs?: number;
+  /** How long a hook but the session's end waits for another's lock; the tests' to shorten. */
+  lockWaitMs?: number;
 }
 
 /**
- * Codex writes a stopped turn's closing line once every Stop hook has
- * returned — another plugin's, which Codex gives ten minutes unless told
- * otherwise — and any compaction after the turn is done; a Stop hook that
- * keeps the turn going has it at work meanwhile, its lines still coming. So
- * the line is waited for while the turn's lines come, and for ten minutes
- * past the last.
+ * Codex writes a stopped turn's closing line once every Stop hook has returned (another plugin's gets ten minutes) and
+ * any compaction is done: so it is waited for while the turn's lines come, and ten minutes past the last.
  */
 const CLOSE_WAIT_MS = 10 * 60_000;
 const POLL_MS = 250;
@@ -44,21 +40,38 @@ const SAVE_EVERY_MS = 1_000;
 
 type Send = (record: RunRecord) => Promise<boolean>;
 
-/** Logs `line` once a thread, remembered in its state as `flag`. */
-function logOnce(dir: string, name: string, flag: 'warnedNoKey' | 'warnedEndpoint', line: string, log: Deps['log']): void {
-  const state = readState(dir, name);
-  if (state[flag] === true) return;
-  log(line);
-  writeState(dir, name, { ...state, [flag]: true });
+/** How long a hook waits for its thread's lock: the session's end, which no hook follows, outwaits any live holder. */
+function lockWaitOf(input: HookInput, deps: Deps): number {
+  return input.event === 'SessionEnd' ? Number.POSITIVE_INFINITY : (deps.lockWaitMs ?? LOCK_WAIT_MS);
+}
+
+/** Logs `line` once a thread, remembered in its state as `flag`, under the thread's lock so no hook's save is lost to it. */
+async function logOnce(settings: Settings, input: HookInput, flag: 'warnedNoKey' | 'warnedKeyFile' | 'warnedEndpoint', line: string, deps: Deps): Promise<void> {
+  const name = stateName(input.sessionId, input.threadId);
+  // Said once already: nothing to wait for the lock for.
+  if (readState(settings.dir, name)[flag] === true) return;
+  await withLock(settings.dir, name, lockWaitOf(input, deps), async () => {
+    const state = readState(settings.dir, name);
+    if (state[flag] === true) return;
+    deps.log(line);
+    const next: ThreadState = { ...state, [flag]: true };
+    // With its rollout, so the session's end finds a subagent that stopped before there was a key to send it with.
+    if (next.path === undefined && input.rolloutPath !== undefined) next.path = input.rolloutPath;
+    writeState(settings.dir, name, next);
+  });
 }
 
 export async function sync(input: HookInput, settings: Settings, deps: Deps): Promise<void> {
   if (input.rolloutPath === undefined) return;
-  const name = stateName(input.sessionId, input.threadId);
-  const { apiKey } = settings;
+  const { apiKey, keyFileProblem } = settings;
+  // The file passed over may have named the endpoint: the key never goes to the default in its place.
+  if (keyFileProblem !== undefined) {
+    const line = `${settings.keyFileName} not used (${keyFileProblem}): fix it, or set both TELMONI_API_KEY and TELMONI_ENDPOINT; nothing is sent until then`;
+    await logOnce(settings, input, 'warnedKeyFile', line, deps);
+    return;
+  }
   if (apiKey === undefined) {
-    const line = 'no key: put it in ~/.codex/telmoni.json, or TELMONI_API_KEY; nothing is sent until then';
-    logOnce(settings.dir, name, 'warnedNoKey', line, deps.log);
+    await logOnce(settings, input, 'warnedNoKey', `no key: put it in ${settings.keyFileName}, or TELMONI_API_KEY; nothing is sent until then`, deps);
     return;
   }
   let sender: ReturnType<Deps['sender']>;
@@ -67,8 +80,8 @@ export async function sync(input: HookInput, settings: Settings, deps: Deps): Pr
   } catch (error) {
     // The SDK's refusal names the endpoint's host at most, never a path, a key or anything of the session.
     if (!(error instanceof TypeError)) throw error;
-    const line = `endpoint refused by the SDK (${error.message}): put another in ~/.codex/telmoni.json, or TELMONI_ENDPOINT`;
-    logOnce(settings.dir, name, 'warnedEndpoint', `${line}; nothing is sent until then`, deps.log);
+    const line = `endpoint refused by the SDK (${error.message}): put another in ${settings.keyFileName}, or TELMONI_ENDPOINT`;
+    await logOnce(settings, input, 'warnedEndpoint', `${line}; nothing is sent until then`, deps);
     return;
   }
   const send: Send = (record) => sender.send(record);
@@ -77,7 +90,14 @@ export async function sync(input: HookInput, settings: Settings, deps: Deps): Pr
     if (input.event !== 'SessionEnd') return;
     // A subagent's thread has no end of its own: the session's is its end.
     for (const threadId of subagentsOf(settings.dir, input.sessionId)) {
-      const { path } = readState(settings.dir, stateName(input.sessionId, threadId));
+      let path: string | undefined;
+      try {
+        ({ path } = readState(settings.dir, stateName(input.sessionId, threadId)));
+      } catch (error) {
+        // One subagent's state unread holds up none of the others'.
+        deps.log(`subagent ${threadId.slice(0, 8)}: state not read: ${kindOf(error)}`);
+        continue;
+      }
       if (path === undefined) continue;
       const subagent: HookInput = { event: 'SessionEnd', sessionId: input.sessionId, threadId, rolloutPath: path };
       if (!(await readThread(subagent, path, settings, deps, send))) return;
@@ -91,7 +111,7 @@ export async function sync(input: HookInput, settings: Settings, deps: Deps): Pr
 async function readThread(input: HookInput, path: string, settings: Settings, deps: Deps, send: Send): Promise<boolean> {
   const name = stateName(input.sessionId, input.threadId);
   let going = true;
-  const locked = await withLock(settings.dir, name, LOCK_WAIT_MS, async () => {
+  const locked = await withLock(settings.dir, name, lockWaitOf(input, deps), async () => {
     going = await readLocked(input, path, name, settings, deps, send);
   });
   if (!locked) deps.log('busy: another hook of this thread held its lock past the wait; the next hook sends');
@@ -144,12 +164,12 @@ async function readLocked(
     if (at.model !== undefined) next.model = at.model;
     if (at.opening !== undefined) next.opening = at.opening;
     if (state.warnedNoKey) next.warnedNoKey = true;
+    if (state.warnedKeyFile) next.warnedKeyFile = true;
     if (state.warnedEndpoint) next.warnedEndpoint = true;
     writeState(settings.dir, name, next);
     saved = Date.now();
   };
-  // A turn with the model's work in it is sent; one the platform did not take
-  // is read again from its opening by the next hook.
+  // A turn with the model's work in it is sent; one the platform did not take is read again from its opening by the next hook.
   const finish = async (turn: Turn, ending?: Ending): Promise<boolean> => {
     if (hasWork(turn)) {
       const calls = turn.responses.length + turn.calls.size;
@@ -183,12 +203,10 @@ async function readLocked(
           if (Date.now() - saved >= SAVE_EVERY_MS) save(turns.checkpoint());
         }
       }
-      // Only the named turn's own lines put off giving up on it: another
-      // turn's would have closed it, and a thread's other work is no news.
+      // Only the named turn's own lines put off giving up on it: another's would have closed it, and the thread's other work is no news.
       if (turns.open?.id === target) news = Date.now();
     }
-    // The turn the hook named is final as it stands, its closing line
-    // unwritten yet; at the session's end, so is whatever was left open.
+    // The turn the hook named is final as it stands, its closing line unwritten; at the session's end, so is whatever was left open.
     const open = turns.open;
     if (open !== undefined) {
       let ending: Ending | undefined;

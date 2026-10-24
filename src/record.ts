@@ -1,8 +1,6 @@
 /**
- * A turn as a run record: the turn a run of `codex`, Codex's session its
- * session, each response of the model a model call with its model and the
- * tokens Codex counted for it, and each tool call by its name, from the
- * model's asking to its completion, failed or cancelled where Codex says so.
+ * A turn as a run record: the turn a run of `codex`, each response a model call with its model and the tokens Codex
+ * counted for it, and each tool call by its name, from the model's asking to its completion, failed or cancelled as Codex says.
  */
 
 import { createHash } from 'node:crypto';
@@ -55,13 +53,10 @@ function outcomeOf(turn: Turn, ending: Ending | undefined): RunOutcome {
   if (closing !== undefined) {
     if (closing.errorType !== undefined) return { errorType: closing.errorType };
     if (!closing.aborted) return {};
-    // A budget stops a turn as an error would; an interruption, or a turn
-    // replaced or a review ended, is cancelled.
+    // A budget stops a turn as an error would; an interruption, a turn replaced or a review ended is cancelled.
     return closing.reason === 'budget_limited' ? { errorType: 'budget_limited' } : { cancelled: true };
   }
-  // With no closing of its own, a turn a Stop hook named had done its work,
-  // whatever came after it; any other was cut short: interrupted, replaced
-  // by the next turn's opening, or left open as the session ended.
+  // With no closing of its own, a turn a Stop hook named had done its work; any other was cut short, interrupted or replaced.
   return ending === 'stopped' ? {} : { cancelled: true };
 }
 
@@ -78,13 +73,9 @@ function usageOf(usage: Usage): NonNullable<ModelCallRecord['usage']> {
   };
 }
 
-/**
- * Ingest's caps on a name: a tool's, and a model call's span, named `chat`
- * and its model, up to 128 characters. A span past either is refused whole,
- * the same way on every hook, so a longer name is cut rather than sent.
- */
-const NAME_MAX = 128;
-const MODEL_MAX = NAME_MAX - 'chat '.length;
+/** Ingest's caps, as the SDK's: a tool's name to 145 characters, a model's to 128, each cut rather than sent past it. */
+const NAME_MAX = 145;
+const MODEL_MAX = 128;
 
 /** `name` cut to `max` characters, as ingest counts them: never inside one. */
 function cut(name: string, max: number): string {
@@ -92,11 +83,20 @@ function cut(name: string, max: number): string {
   return characters.length <= max ? name : characters.slice(0, max).join('');
 }
 
-/**
- * The most calls a run holds, its earliest: the SDK queues a record whole,
- * and a turn past what its queue is sized for would be cut short on every
- * hook, and never taken.
- */
+/** A file's path, which a local model's name, set in a person's configuration, may be: never sent. */
+const PATH = /^(?:[/\\]|~(?:[/\\]|$)|\.{1,2}[/\\]|[A-Za-z]:[/\\]|file:)/i;
+
+/** A path ending in a local model's weights, from anywhere: the file's name is the model's, and is sent without its folders. */
+const MODEL_FILE = /[/\\]([^/\\]+\.(?:gguf|ggml|bin|safetensors|llamafile))$/i;
+
+/** A model's name as Codex gives it, cut to ingest's cap: a model file's own name for its path, `unknown` for any other path. */
+function modelOf(name: string): string {
+  const file = MODEL_FILE.exec(name.trim())?.[1];
+  if (file !== undefined) return cut(file, MODEL_MAX);
+  return PATH.test(name.trim()) ? 'unknown' : cut(name, MODEL_MAX);
+}
+
+/** The most calls a run holds, its earliest: the SDK queues a record whole, and a turn past its queue would be cut short on every hook, never taken. */
 export const MAX_CALLS = 10_000;
 
 /** Whether the turn holds any of the model's work, which is what makes it a run. */
@@ -114,13 +114,12 @@ export function recordOf(turn: Turn, context: Context, ending?: Ending): RunReco
   turn.responses.forEach((response, index) => {
     const call: ModelCallRecord = {
       type: 'model_call',
-      model: cut(response.model ?? turn.model ?? context.model ?? 'unknown', MODEL_MAX),
+      model: modelOf(response.model ?? turn.model ?? context.model ?? 'unknown'),
       start: response.start,
       end: Math.max(response.start, response.end),
     };
     if (context.provider !== undefined) call.provider = context.provider;
-    // One count per response, never two: Codex's record of it where it wrote
-    // one, its share of the running total only where it wrote none.
+    // One count per response, never two: Codex's record of it where it wrote one, its share of the running total where it wrote none.
     const usage = response.recorded ?? response.counted;
     if (usage !== undefined) {
       call.usage = usageOf(usage);
@@ -140,8 +139,7 @@ export function recordOf(turn: Turn, context: Context, ending?: Ending): RunReco
     else if (tool.outcome === 'failed') call.errorType = 'ToolError';
     items.push(call);
   }
-  // In the order they started, so the record, and the ids derived from each
-  // span's place in it, come out the same however the lines were written.
+  // In the order they started, so the record and the ids derived from each span's place come out the same however the lines were written.
   const order = new Map(items.map((item, index) => [item, index]));
   items.sort((a, b) => Number(a.start) - Number(b.start) || order.get(a)! - order.get(b)!);
   const inside = items.slice(0, MAX_CALLS);
@@ -149,8 +147,7 @@ export function recordOf(turn: Turn, context: Context, ending?: Ending): RunReco
     runId: runIdOf(context.sessionId, turn.id),
     agent: AGENT,
     sessionId: context.sessionId,
-    // A clock set back mid-turn writes a call before the turn's own opening:
-    // the run still holds every call, from its first start to its last end.
+    // A clock set back mid-turn writes a call before the turn's opening: the run still holds every call, first start to last end.
     start: inside.reduce((earliest, item) => Math.min(earliest, Number(item.start)), start),
     end: inside.reduce((latest, item) => Math.max(latest, Number(item.end)), until),
     inside,

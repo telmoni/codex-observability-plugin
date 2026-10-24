@@ -75,11 +75,7 @@ function rolloutIn(codex: string, threadId: string): string {
 const offsetOf = (path: string): number | undefined =>
   existsSync(path) ? (JSON.parse(readFileSync(path, 'utf8')) as { offset: number }).offset : undefined;
 
-/**
- * The command lines of the hook's running copies handed `session`, as anyone
- * on the machine may list them; Linux's `/proc` alone says, and only the
- * hook's own processes are looked into.
- */
+/** The command lines of the hook's running copies handed `session`, as anyone may list them, read from Linux's `/proc` for the hook's own processes alone. */
 function copiesOf(session: string): string[][] {
   const found: string[][] = [];
   for (const pid of readdirSync('/proc').filter((name) => /^\d+$/.test(name))) {
@@ -159,9 +155,9 @@ describe('the hook', () => {
     const spans = ingest.spans();
     expect(refusalsIn(spans)).toEqual([]);
     const tools = spans.map((span) => attributesOf(span)['gen_ai.tool.name']).filter((name) => name !== undefined);
-    expect(tools).toContain(`mcp__${server}__search`.slice(0, 128));
+    expect(tools).toContain(`mcp__${server}__search`.slice(0, 145));
     const models = new Set(spans.map((span) => attributesOf(span)['gen_ai.request.model']).filter((name) => name !== undefined));
-    expect([...models]).toEqual([model.slice(0, 123)]);
+    expect([...models]).toEqual([model.slice(0, 128)]);
     expect(existsSync(join(codex, 'telmoni', 'hook.log'))).toBe(false);
   }, 30_000);
 
@@ -291,7 +287,7 @@ describe('the hook', () => {
     expect(ran).toMatchObject({ code: 0, signal: null, stdout: '', stderr: '' });
     // Inside the ten seconds Codex gives a Stop hook.
     expect(ran.ms).toBeLessThan(10_000);
-    expect(readFileSync(join(home.path, '.codex', 'telmoni', 'hook.log'), 'utf8')).toMatch(/failed: Error\n$/);
+    expect(readFileSync(join(home.path, '.codex', 'telmoni', 'hook.log'), 'utf8')).toMatch(/failed: NoHookInput\n$/);
   }, 20_000);
 
   it('logs input it does not understand, sends nothing, and still exits 0', async () => {

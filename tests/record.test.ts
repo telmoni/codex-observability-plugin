@@ -136,8 +136,7 @@ describe('a turn as a run', () => {
       ['mcp__docs__search', 'ToolError', undefined],
       ['web_search', undefined, undefined],
     ]);
-    // A legacy rollout keeps a command's exit code only in its output's text,
-    // which is never read: the command that exited 1 is not marked failed.
+    // A legacy rollout keeps a command's exit code only in its output's text, never read: the command that exited 1 is not marked failed.
     const [legacy] = runsOf('legacy');
     expect(toolCalls(legacy!).map((tool) => [tool.name, tool.errorType])).toEqual([
       ['shell', undefined],
@@ -427,11 +426,11 @@ describe('a turn of more calls than a run holds', () => {
 });
 
 describe('a name past ingest’s caps', () => {
-  it('is cut to them by character, never inside one: a tool’s to 128, a model’s to fit `chat` and it in 128', () => {
+  it('is cut to them by character, never inside one: a tool’s to 145, a model’s to 128', () => {
     const meta: Meta = { threadId: 't', sessionId: 't', created: at(0), derived: false, ownFrom: undefined, provider: 'openai' };
     // An astral character straddles each cap, two UTF-16 units that must not be parted.
-    const model = `${'m'.repeat(122)}😀${'m'.repeat(40)}`;
-    const tool = `mcp__${'s'.repeat(60)}__${'t'.repeat(60)}😀😀${'t'.repeat(40)}`;
+    const model = `${'m'.repeat(127)}😀${'m'.repeat(40)}`;
+    const tool = `mcp__${'s'.repeat(60)}__${'t'.repeat(77)}😀😀${'t'.repeat(40)}`;
     let place = 0;
     const line = (event: Event): Line => ({ start: place, end: ++place, time: at(1) + place, ordinal: undefined, event });
     const turns = new Turns(meta, new Set(), undefined, { offset: 0, countKey: undefined, model });
@@ -444,14 +443,32 @@ describe('a name past ingest’s caps', () => {
     const run = recordOf(turn!, { sessionId: 's', provider: 'openai', model: undefined })!;
     const [call] = modelCalls(run);
     const [used] = toolCalls(run);
-    expect([...call!.model]).toHaveLength(123);
+    expect([...call!.model]).toHaveLength(128);
     expect(call!.model.endsWith('😀')).toBe(true);
-    expect([...`chat ${call!.model}`]).toHaveLength(128);
-    expect([...used!.name]).toHaveLength(128);
+    expect([...used!.name]).toHaveLength(145);
     expect(used!.name.endsWith('😀')).toBe(true);
     expect(`${call!.model}${used!.name}`).not.toMatch(/\p{Cs}/u);
     // A name within the caps is sent whole.
     expect(modelCalls(runsOf('paginated')[0]!).map((each) => each.model)).toEqual(['gpt-5.5-codex', 'gpt-5.5-codex', 'gpt-5.5-codex']);
+  });
+});
+
+describe('a local model’s name', () => {
+  it('is sent as Codex gives it, a model file’s own name for its path, and never a path', () => {
+    const meta: Meta = { threadId: 't', sessionId: 't', created: at(0), derived: false, ownFrom: undefined, provider: 'ollama' };
+    const sent = (model: string): string => {
+      let place = 0;
+      const line = (event: Event): Line => ({ start: place, end: ++place, time: at(1) + place, ordinal: undefined, event });
+      const turns = new Turns(meta, new Set(), undefined, { offset: 0, countKey: undefined, model });
+      const [turn] = [line({ kind: 'start', turnId: 'turn' }), line({ kind: 'output' }), line({ kind: 'complete', turnId: 'turn', errorType: undefined })].flatMap((each) => turns.push(each));
+      return modelCalls(recordOf(turn!, { sessionId: 's', provider: 'ollama', model: undefined })!)[0]!.model;
+    };
+    for (const model of ['gpt-oss:20b', 'openai/gpt-oss-20b', 'qwen3-coder-30b.gguf']) expect(sent(model)).toBe(model);
+    expect(sent('/home/someone/models/gpt-oss-20b-mxfp4.gguf')).toBe('gpt-oss-20b-mxfp4.gguf');
+    expect(sent('models/x.gguf')).toBe('x.gguf');
+    expect(sent('C:\\Users\\someone\\models\\x.safetensors')).toBe('x.safetensors');
+    expect(sent(' /home/someone/models/x.gguf ')).toBe('x.gguf');
+    for (const path of ['/home/someone/models/gpt-oss', ' /home/someone', '~/models/x', './x', 'D:/models/x', 'file:///home/someone/m']) expect(sent(path)).toBe('unknown');
   });
 });
 

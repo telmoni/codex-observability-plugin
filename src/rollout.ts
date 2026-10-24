@@ -1,18 +1,6 @@
 /**
- * A Codex rollout, read as far as the turns' metadata goes.
- *
- * A rollout is JSON Lines that Codex appends as a thread goes, each line a
- * record — `{"timestamp", "ordinal"?, "type", "payload"}` — in one of two
- * dialects, legacy or paginated (`session_meta.history_mode`), the second
- * numbering its records and writing a completion for every item. Each line is
- * parsed, what the plugin keeps of it picked out field by field there and
- * then, and the rest dropped: of the session, its ids, when it was made and
- * what it was made from; of a turn's opening and closing, its id and its
- * error's kind; of the model's output, only that there was some; of the
- * tokens Codex counted for a response, the counts; of a tool call, its id and
- * name, and of its completion whether it failed and when it ran. A message's
- * text, a reasoning summary, a call's arguments or output, a command, a path
- * and the session's folder are never copied out of a line.
+ * A Codex rollout — JSON Lines of `{"timestamp", "ordinal"?, "type", "payload"}` records in two dialects, legacy and
+ * paginated (`session_meta.history_mode`) — read as far as the turns' metadata goes, each line picked field by field and the rest dropped.
  */
 
 import { closeSync, openSync, readSync } from 'node:fs';
@@ -42,29 +30,25 @@ export interface Meta {
   provider: string | undefined;
 }
 
-/**
- * What a line says, as far as the plugin reads it:
- * - `start`, `complete`, `aborted`: a turn opens; ends, failed where Codex
- *   gives its error's kind; or is cut short, interrupted or past a budget;
- * - `context`: the model a turn runs on;
- * - `output`: the model wrote something, a reply or its reasoning;
- * - `call`: the model called a tool; `result`: the tool's answer went back;
- * - `input`: the model was given something, a prompt or an instruction;
- * - `done`: Codex's own record of a tool's completion, its outcome and times;
- * - `usage`: the tokens of one response, written as it completed (Codex 0.153 on);
- * - `count`: a running total, as legacy rollouts give tokens: `key` names
- *   it, and `usage` is the last response's share where that reads true;
- * - `meta`: the thread itself, on the first line.
- */
+/** What a line says, as far as the plugin reads it. */
 export type Event =
+  // A turn opens.
   | { kind: 'start'; turnId: string }
+  // A turn ends, failed where Codex gives its error's kind.
   | { kind: 'complete'; turnId: string; errorType: string | undefined }
+  // A turn is cut short: interrupted, or past a budget.
   | { kind: 'aborted'; turnId: string | undefined; reason: string | undefined; errorType: string | undefined }
+  // The model a turn runs on.
   | { kind: 'context'; turnId: string | undefined; model: string | undefined }
+  // The model wrote something, a reply or its reasoning.
   | { kind: 'output' }
+  // The model called a tool.
   | { kind: 'call'; callId: string; name: string; inPlace: boolean; outcome: Outcome | undefined }
+  // The tool's answer went back.
   | { kind: 'result'; callId: string }
+  // The model was given something, a prompt or an instruction.
   | { kind: 'input' }
+  // Codex's own record of a tool's completion, its outcome and times.
   | {
       kind: 'done';
       callId: string;
@@ -74,8 +58,11 @@ export type Event =
       endMs: number | undefined;
       durationMs: number | undefined;
     }
+  // The tokens of one response, written as it completed (Codex 0.153 on).
   | { kind: 'usage'; turnId: string | undefined; responseId: string | undefined; usage: Usage }
+  // A running total, as legacy rollouts give tokens: `key` names it, and `usage` is the last response's share where that reads true.
   | { kind: 'count'; key: string; usage: Usage | undefined }
+  // The thread itself, on the first line.
   | { kind: 'meta'; meta: Meta }
   | { kind: 'other' };
 
@@ -94,7 +81,8 @@ type Fields = Record<string, unknown>;
 
 const OTHER: Event = { kind: 'other' };
 
-function fieldsOf(value: unknown): Fields | undefined {
+/** The object `value` is, or undefined: a line, the hook's input and the settings file are read field by field. */
+export function fieldsOf(value: unknown): Fields | undefined {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Fields) : undefined;
 }
 
@@ -143,18 +131,16 @@ function errorTypeOf(value: unknown): string | undefined {
 }
 
 /**
- * A count, as far as a number holds one exactly: no count Codex makes runs
- * past it, and one past 10^21 would go out in exponent form, which ingest
- * refuses with the whole export.
+ * A count, as far as a number holds one exactly: no count Codex makes runs past it, and one past 10^21 would go out in
+ * exponent form, which ingest refuses with the whole export.
  */
 function count(value: unknown): number {
   return typeof value === 'number' && value > 0 && value <= Number.MAX_SAFE_INTEGER ? Math.trunc(value) : 0;
 }
 
 /**
- * The latest time read as one: past it, a time and a duration after it
- * would overflow the 64 bits of nanoseconds OTLP counts in, and ingest would
- * refuse the whole export on every hook.
+ * The latest time read as one: past it, a time and a duration after it would overflow the 64 bits of nanoseconds OTLP
+ * counts in, and ingest would refuse the whole export on every hook.
  */
 const LATEST_MS = Date.UTC(2200, 0, 1);
 
@@ -199,13 +185,8 @@ const USAGE_FIELDS = [
 ];
 
 /**
- * A running total, `token_count`. Codex writes one after each response's
- * tools have run, and again, unchanged, whenever its rate limits refresh;
- * after a compaction, or past the context window, its last share is an
- * estimate, zero but for its total. So the last share reads true only where
- * its total is its input and output summed, some of either, and it holds no
- * more cached tokens than input nor reasoning than output; whether it is new
- * is for the reader to tell, by its key.
+ * A running total, `token_count`, written after each response's tools ran and again, unchanged, as rate limits refresh;
+ * an estimate after a compaction or past the context window, read true only where its parts add up, new by its key.
  */
 function countOf(value: unknown): Event {
   const info = fieldsOf(value);
@@ -271,8 +252,7 @@ function responseEvent(item: Fields): Event {
       return callId === undefined ? { kind: 'input' } : { kind: 'result', callId };
     }
     default:
-      // A compaction's summary is no call of its own: its tokens, where Codex
-      // counts them, are the call.
+      // A compaction's summary is no call of its own: its tokens, where Codex counts them, are the call.
       return OTHER;
   }
 }
@@ -296,9 +276,8 @@ function done(
 }
 
 /**
- * `item_completed`, which a paginated rollout writes for every item. Of a
- * tool's item: its status, a command's exit code, an MCP tool's server and
- * name, and its times.
+ * `item_completed`, which a paginated rollout writes for every item. Of a tool's item: its status, a command's exit
+ * code, an MCP tool's server and name, and its times.
  */
 function completionEvent(message: Fields): Event {
   const item = fieldsOf(message['item']);
@@ -361,7 +340,7 @@ function messageEvent(message: Fields): Event {
         kind: 'aborted',
         turnId: idOf(message['turn_id']),
         reason: kindOf(message['reason']),
-        errorType: message['error'] === null || message['error'] === undefined ? undefined : errorTypeOf(message['error']),
+        errorType: errorTypeOf(message['error']),
       };
     case 'token_count':
       return countOf(message['info']);
@@ -492,9 +471,8 @@ export class Reader {
   }
 
   /**
-   * The whole lines in the next stretch, or none, `undefined`, once the
-   * rollout holds nothing new. A last line with no newline yet is still being
-   * written: it waits for a later read.
+   * The whole lines in the next stretch, or `undefined` once the rollout holds nothing new. A last line with no newline
+   * yet is still being written: it waits for a later read.
    */
   read(): Line[] | undefined {
     const n = readSync(this.#fd, this.#buffer, 0, this.#chunk, this.#position);
@@ -549,11 +527,8 @@ export interface Opening {
 }
 
 /**
- * Whether the rollout still reads as it did where a hook left it: a line
- * ends at `offset`, and the turn last seen opening before it opens where it
- * did. Codex only appends to a rollout, and replaces one whole; one
- * rewritten where it lies, its lines moved, fails either, and is read again
- * from its start.
+ * Whether the rollout still reads as it did where a hook left it: a line ends at `offset`, and the turn last seen
+ * opening before it opens where it did: one rewritten in place fails either, and is read again from its start.
  */
 export function readsAsBefore(path: string, offset: number, opening: Opening | undefined): boolean {
   try {
