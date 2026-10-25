@@ -77,8 +77,8 @@ describe('a sender', () => {
     } finally {
       await sender.close();
     }
-    expect(ingest.received).toHaveLength(Math.ceil((calls + 2) / 512));
-    expect(ingest.spans()).toHaveLength(calls + 2);
+    expect(ingest.received).toHaveLength(Math.ceil((calls + 1) / 512));
+    expect(ingest.spans()).toHaveLength(calls + 1);
     expect(refusalsIn(ingest.spans())).toEqual([]);
     expect(logged).toEqual([]);
   });

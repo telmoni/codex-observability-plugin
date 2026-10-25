@@ -123,7 +123,6 @@ export function refusalsIn(spans: JsonSpan[]): string[] {
 }
 
 function refusalOf(span: JsonSpan): string | undefined {
-  if (span.name === 'telmoni.run.start') return undefined;
   if (!/^[0-9a-f]{32}$/.test(span.traceId) || /^0+$/.test(span.traceId)) return 'trace_id';
   if (!/^[0-9a-f]{16}$/.test(span.spanId) || /^0+$/.test(span.spanId)) return 'span_id';
   if (span.parentSpanId !== undefined && span.parentSpanId !== '' && !/^[0-9a-f]{16}$/.test(span.parentSpanId)) {
