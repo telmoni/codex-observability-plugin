@@ -21,7 +21,7 @@ let logged: string[];
 
 beforeEach(() => {
   dir = tempDir();
-  settings = { apiKey: 'telmoni_test', endpoint: undefined, dir: join(dir.path, 'telmoni'), keyFileName: '~/.codex/telmoni.json' };
+  settings = { apiKey: 'tm_test', endpoint: undefined, dir: join(dir.path, 'telmoni'), keyFileName: '~/.codex/telmoni.json' };
   sent = [];
   answers = [];
   logged = [];
@@ -447,7 +447,7 @@ describe('a hook', () => {
     settings.keyFileProblem = problem;
     await hook('Stop', path, F);
     delete settings.keyFileProblem;
-    settings.apiKey = 'telmoni_test';
+    settings.apiKey = 'tm_test';
     await hook('Stop', path, F);
     expect(sent.length).toBeGreaterThan(0);
     settings.apiKey = undefined;
@@ -527,7 +527,7 @@ describe('a subagent', () => {
     settings.apiKey = undefined;
     await hook('SubagentStop', path, own, {}, input);
     expect(sent).toEqual([]);
-    settings.apiKey = 'telmoni_test';
+    settings.apiKey = 'tm_test';
     const root = join(dir.path, 'root.jsonl');
     writeFileSync(root, `${JSON.stringify({ timestamp: new Date(0).toISOString(), type: 'session_meta', payload: { id: meta.sessionId, timestamp: new Date(0).toISOString() } })}\n`);
     await hook('SessionEnd', root, undefined, {}, { sessionId: meta.sessionId, threadId: meta.sessionId });
@@ -644,7 +644,7 @@ describe('what a hook keeps', () => {
     settings.keyFileProblem = 'open to other users; chmod 600 it';
     await hook('Stop', path, F);
     delete settings.keyFileProblem;
-    settings.apiKey = 'telmoni_test';
+    settings.apiKey = 'tm_test';
     settings.endpoint = 'http://telmoni.example';
     await hook('Stop', path, F, { sender: (destination) => new Sender(destination, (line) => void logged.push(line)) });
     const files = readdirSync(settings.dir);

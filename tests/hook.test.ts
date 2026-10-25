@@ -113,7 +113,7 @@ describe('the hook', () => {
         stop_hook_active: false,
         last_assistant_message: 'FAKE reply',
       },
-      { TELMONI_API_KEY: 'telmoni_test', TELMONI_ENDPOINT: endpoint },
+      { TELMONI_API_KEY: 'tm_test', TELMONI_ENDPOINT: endpoint },
     );
     expect(ran).toMatchObject({ code: 0, stdout: '', stderr: '' });
     expect(ran.ms).toBeLessThan(1500);
@@ -148,7 +148,7 @@ describe('the hook', () => {
     );
     const ran = await runHook(
       { session_id: session, transcript_path: rollout, cwd: home.path, hook_event_name: 'SessionEnd', reason: 'other' },
-      { TELMONI_API_KEY: 'telmoni_test', TELMONI_ENDPOINT: endpoint },
+      { TELMONI_API_KEY: 'tm_test', TELMONI_ENDPOINT: endpoint },
     );
     expect(ran).toMatchObject({ code: 0, stdout: '', stderr: '' });
     expect(await until(() => offsetOf(join(codex, 'telmoni', `${session}.json`)) === statSync(rollout).size, 20_000)).toBe(true);
@@ -164,7 +164,7 @@ describe('the hook', () => {
   it('reads its key from the plugin’s own file, in the folder Codex runs with, and sends what a session left at its end', async () => {
     const codex = join(home.path, 'elsewhere');
     mkdirSync(codex, { recursive: true });
-    writeFileSync(join(codex, 'telmoni.json'), JSON.stringify({ apiKey: 'telmoni_test', endpoint }), { mode: 0o600 });
+    writeFileSync(join(codex, 'telmoni.json'), JSON.stringify({ apiKey: 'tm_test', endpoint }), { mode: 0o600 });
     const session = readMeta(fixture('legacy'))!.sessionId;
     const rollout = rolloutIn(codex, session);
     writeFileSync(rollout, readFileSync(fixture('legacy')));
@@ -177,7 +177,7 @@ describe('the hook', () => {
     expect(await until(() => offsetOf(join(codex, 'telmoni', `${session}.json`)) === statSync(rollout).size, 20_000)).toBe(true);
     expect(ingest.received).toHaveLength(4);
     expect(refusalsIn(ingest.spans())).toEqual([]);
-    expect(ingest.received.every((request) => request.headers['authorization'] === 'Bearer telmoni_test')).toBe(true);
+    expect(ingest.received.every((request) => request.headers['authorization'] === 'Bearer tm_test')).toBe(true);
     expect(existsSync(join(home.path, '.codex'))).toBe(false);
   }, 30_000);
 
@@ -189,7 +189,7 @@ describe('the hook', () => {
     writeFileSync(rollout, readFileSync(fixture('legacy')));
     const ran = await runHook(
       { session_id: session, transcript_path: rollout, cwd: home.path, hook_event_name: 'SessionEnd', reason: 'other' },
-      { TELMONI_API_KEY: 'telmoni_test', TELMONI_ENDPOINT: endpoint },
+      { TELMONI_API_KEY: 'tm_test', TELMONI_ENDPOINT: endpoint },
     );
     expect(ran).toMatchObject({ code: 0, stdout: '', stderr: '' });
     const log = join(codex, 'telmoni', 'hook.log');
@@ -199,7 +199,7 @@ describe('the hook', () => {
     expect(await until(() => existsSync(state) && !existsSync(lock), 20_000)).toBe(true);
     const written = readFileSync(log, 'utf8');
     expect(written).toMatch(/^\S+ SessionEnd [0-9a-f]{8}: not sent: telmoni: export refused with 403 \/errors\/authz\/forbidden; the batch was dropped\n$/);
-    for (const text of [...CONTENT, home.path, 'telmoni_test', endpoint]) expect(written).not.toContain(text);
+    for (const text of [...CONTENT, home.path, 'tm_test', endpoint]) expect(written).not.toContain(text);
     if (process.platform !== 'win32') {
       expect(statSync(join(codex, 'telmoni')).mode & 0o777).toBe(0o700);
       expect(statSync(log).mode & 0o777).toBe(0o600);
@@ -233,7 +233,7 @@ describe('the hook', () => {
     const rollout = rolloutIn(codex, session);
     writeFileSync(rollout, readFileSync(fixture('legacy')));
     const input = { session_id: session, transcript_path: rollout, cwd: home.path, hook_event_name: 'SessionEnd', reason: 'other' };
-    const env = { TELMONI_API_KEY: 'telmoni_test', TELMONI_ENDPOINT: 'http://telmoni.example' };
+    const env = { TELMONI_API_KEY: 'tm_test', TELMONI_ENDPOINT: 'http://telmoni.example' };
     const log = join(codex, 'telmoni', 'hook.log');
     const state = join(codex, 'telmoni', `${session}.json`);
     expect(await runHook(input, env)).toMatchObject({ code: 0, stdout: '' });
@@ -243,7 +243,7 @@ describe('the hook', () => {
     const written = readFileSync(log, 'utf8');
     expect(written.trim().split('\n')).toHaveLength(1);
     expect(written).toMatch(/SessionEnd [0-9a-f]{8}: endpoint refused by the SDK \(refusing to send the API key over unencrypted HTTP to 'telmoni\.example'; use HTTPS\)/);
-    for (const text of [...CONTENT, home.path, 'telmoni_test']) expect(written).not.toContain(text);
+    for (const text of [...CONTENT, home.path, 'tm_test']) expect(written).not.toContain(text);
     expect(ingest.received).toEqual([]);
   }, 30_000);
 
@@ -257,7 +257,7 @@ describe('the hook', () => {
     // Torn as no hook leaves one, since each syncs its state before renaming it over the last.
     writeFileSync(join(kept, `${session}.json`), '{"offset":', { mode: 0o600 });
     const input = { session_id: session, transcript_path: rollout, cwd: home.path, hook_event_name: 'SessionEnd', reason: 'other' };
-    expect(await runHook(input, { TELMONI_API_KEY: 'telmoni_test', TELMONI_ENDPOINT: endpoint })).toMatchObject({ code: 0, stdout: '' });
+    expect(await runHook(input, { TELMONI_API_KEY: 'tm_test', TELMONI_ENDPOINT: endpoint })).toMatchObject({ code: 0, stdout: '' });
     const log = join(kept, 'hook.log');
     // The line is the copy's last write.
     expect(await until(() => existsSync(log) && readFileSync(log, 'utf8').endsWith('\n'), 20_000)).toBe(true);
@@ -311,7 +311,7 @@ describe('the hook', () => {
         stop_hook_active: false,
         last_assistant_message: null,
       },
-      { TELMONI_API_KEY: 'telmoni_test', TELMONI_ENDPOINT: endpoint },
+      { TELMONI_API_KEY: 'tm_test', TELMONI_ENDPOINT: endpoint },
     );
     expect(ran).toMatchObject({ code: 0, stdout: '' });
     expect(existsSync(join(home.path, '.codex'))).toBe(false);

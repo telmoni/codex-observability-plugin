@@ -392,7 +392,7 @@ describe('a turn whose clock was set back while it ran', () => {
     expect([Number(run.start), Number(run.end)]).toEqual([at(1) + 80, at(1) + 300]);
     // The SDK refuses a record with any span ending before it starts; this one it queues.
     const telmoni = new Telmoni(
-      { endpoint: 'http://127.0.0.1:9', apiKey: 'telmoni_test' },
+      { endpoint: 'http://127.0.0.1:9', apiKey: 'tm_test' },
       { transport: () => Promise.resolve({ status: 200, headers: { get: () => null }, text: () => Promise.resolve('{}') }) },
     );
     try {

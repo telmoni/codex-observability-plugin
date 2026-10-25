@@ -44,7 +44,7 @@ touch ~/.codex/telmoni.json && chmod 600 ~/.codex/telmoni.json
 ```
 
 ```json
-{ "apiKey": "telmoni_…" }
+{ "apiKey": "tm_…" }
 ```
 
 The endpoint defaults to `https://api.telmoni.com`; a self-hosted Telmoni gives its own machine host as `"endpoint"`. `TELMONI_API_KEY` and `TELMONI_ENDPOINT` in Codex's environment — your shell's, or the `.env` in Codex's folder (`~/.codex/.env`), which Codex loads itself — come before the file.
