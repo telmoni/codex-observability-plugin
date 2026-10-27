@@ -22,8 +22,7 @@ The Codex plugin for Telmoni ([`telmoni/codex-observability-plugin`](https://git
 | `.codex-plugin/plugin.json`, `hooks/hooks.json` | The plugin, shipped in the package: its manifest and its four hooks. |
 | `.agents/plugins/marketplace.json` | The marketplace, `telmoni-plugins`, naming the plugin by its npm package: an install fetches the package as built, never a build of the clone. |
 | `ARCHITECTURE.md` | How the plugin works, and why. |
-| [`telmoni/telmoni`](https://github.com/telmoni/telmoni) | Sibling repo, checked out as `../telmoni`: the SDK this plugin is built on (`sdk/typescript`, `recordRun`), which it takes from npm as `telmoni`. |
-| [`telmoni/docs`](https://github.com/telmoni/docs) | Sibling repo, checked out as `../docs`: the book, whose `api/coding-agents.mdx` documents this plugin. |
+| [`telmoni/telmoni`](https://github.com/telmoni/telmoni) | Sibling repo, checked out as `../telmoni`: the SDK this plugin is built on (`sdk/typescript`, `recordRun`), which it takes from npm as `telmoni`, and the book, whose `web/content/docs/api/coding-agents.mdx` documents this plugin. |
 
 ## Commands
 - **After every change** (no permission needed; report failures verbatim): `make check` — the types, the bundle and the suites (`npm run verify`), the manifests and the package among them, since Codex ships no validator for either.
@@ -51,5 +50,5 @@ The Codex plugin for Telmoni ([`telmoni/codex-observability-plugin`](https://git
 ## Definition of Done
 - [ ] `make check` passes, or the failure is reported verbatim.
 - [ ] No key, no text from a session and no path reaches a log, a record, a fixture or a commit.
-- [ ] `ARCHITECTURE.md` and `README.md` say what changed, and the book's `api/coding-agents.mdx` (`../docs`) is fixed or named.
+- [ ] `ARCHITECTURE.md` and `README.md` say what changed, and the book's `api/coding-agents.mdx` (`../telmoni/web/content/docs`) is fixed or named.
 - [ ] Nothing that needs asking happened unasked (dependencies, publishing, live calls, other repos, commits).
