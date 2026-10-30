@@ -75,6 +75,35 @@ export function subagentsOf(dir: string, sessionId: string): string[] {
     .sort();
 }
 
+/**
+ * Marks, or unmarks, a session whose end met a turn the platform did not take: a session's end is its last hook, so the
+ * next hook of any session sends what it left.
+ */
+export function markLeft(dir: string, sessionId: string, left: boolean): void {
+  const path = join(dir, `${sessionId}.left`);
+  if (left) writeFileSync(path, '', { mode: 0o600 });
+  else rmSync(path, { force: true });
+}
+
+/** The sessions whose end left turns unsent, the longest waiting first. */
+export function leftSessions(dir: string): string[] {
+  let names: string[] = [];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    // Nothing read yet.
+  }
+  const marked = names.filter((name) => name.endsWith('.left')).map((name) => name.slice(0, -'.left'.length)).filter(isId);
+  const waited = (sessionId: string): number => {
+    try {
+      return statSync(join(dir, `${sessionId}.left`)).mtimeMs;
+    } catch {
+      return 0;
+    }
+  };
+  return marked.sort((a, b) => waited(a) - waited(b) || a.localeCompare(b));
+}
+
 /** A thread's state: afresh only where none was saved, since one read as new would send the thread again from the top. */
 export function readState(dir: string, name: string): ThreadState {
   let text: string;

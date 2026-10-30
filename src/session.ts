@@ -14,7 +14,7 @@ import { type Context, type Ending, MAX_CALLS, hasWork, recordOf } from './recor
 import { type Meta, Reader, readMeta, readsAsBefore } from './rollout.js';
 import type { Destination } from './send.js';
 import type { Settings } from './settings.js';
-import { type ThreadState, readState, stateName, subagentsOf, withLock, writeState } from './state.js';
+import { type ThreadState, leftSessions, markLeft, readState, stateName, subagentsOf, withLock, writeState } from './state.js';
 import { type Checkpoint, type Turn, Turns } from './turns.js';
 
 export interface Deps {
@@ -86,35 +86,74 @@ export async function sync(input: HookInput, settings: Settings, deps: Deps): Pr
   }
   const send: Send = (record) => sender.send(record);
   try {
-    if (!(await readThread(input, input.rolloutPath, settings, deps, send))) return;
-    if (input.event !== 'SessionEnd') return;
-    // A subagent's thread has no end of its own: the session's is its end.
-    for (const threadId of subagentsOf(settings.dir, input.sessionId)) {
-      let path: string | undefined;
-      try {
-        ({ path } = readState(settings.dir, stateName(input.sessionId, threadId)));
-      } catch (error) {
-        // One subagent's state unread holds up none of the others'.
-        deps.log(`subagent ${threadId.slice(0, 8)}: state not read: ${kindOf(error)}`);
-        continue;
-      }
-      if (path === undefined) continue;
-      const subagent: HookInput = { event: 'SessionEnd', sessionId: input.sessionId, threadId, rolloutPath: path };
-      if (!(await readThread(subagent, path, settings, deps, send))) return;
+    const waitMs = lockWaitOf(input, deps);
+    let reached: boolean;
+    if (input.event === 'SessionEnd') {
+      reached = await endSession(input, input.rolloutPath, settings, deps, send, waitMs);
+      markLeft(settings.dir, input.sessionId, !reached);
+    } else {
+      reached = await readThread(input, input.rolloutPath, settings, deps, send, waitMs);
     }
+    if (reached) await sendLeft(input.sessionId, settings, deps, send);
   } finally {
     await sender.close();
   }
 }
 
-/** False where a turn was not taken, and the hooks after this one are to send it. */
-async function readThread(input: HookInput, path: string, settings: Settings, deps: Deps, send: Send): Promise<boolean> {
+/** A session's own thread and then its subagents', each ended with it; false where a turn was not taken. */
+async function endSession(input: HookInput, path: string, settings: Settings, deps: Deps, send: Send, waitMs: number): Promise<boolean> {
+  if (!(await readThread(input, path, settings, deps, send, waitMs))) return false;
+  // A subagent's thread has no end of its own: the session's is its end.
+  for (const threadId of subagentsOf(settings.dir, input.sessionId)) {
+    let subagentPath: string | undefined;
+    try {
+      ({ path: subagentPath } = readState(settings.dir, stateName(input.sessionId, threadId)));
+    } catch (error) {
+      // One subagent's state unread holds up none of the others'.
+      deps.log(`subagent ${threadId.slice(0, 8)}: state not read: ${kindOf(error)}`);
+      continue;
+    }
+    if (subagentPath === undefined) continue;
+    const subagent: HookInput = { event: 'SessionEnd', sessionId: input.sessionId, threadId, rolloutPath: subagentPath };
+    if (!(await readThread(subagent, subagentPath, settings, deps, send, waitMs))) return false;
+  }
+  return true;
+}
+
+/** What other sessions' ends left, the longest waiting first, each lock taken without waiting, until one is still not taken. */
+async function sendLeft(own: string, settings: Settings, deps: Deps, send: Send): Promise<void> {
+  for (const sessionId of leftSessions(settings.dir)) {
+    if (sessionId === own) continue;
+    let path: string | undefined;
+    try {
+      ({ path } = readState(settings.dir, sessionId));
+    } catch (error) {
+      deps.log(`session ${sessionId.slice(0, 8)}: state not read: ${kindOf(error)}`);
+      continue;
+    }
+    if (path === undefined) {
+      markLeft(settings.dir, sessionId, false);
+      continue;
+    }
+    const left: HookInput = { event: 'SessionEnd', sessionId, threadId: sessionId, rolloutPath: path };
+    const reached = await endSession(left, path, settings, deps, send, 0);
+    markLeft(settings.dir, sessionId, !reached);
+    // The platform away again, or another hook at work on that session: the next hook tries again.
+    if (!reached) return;
+  }
+}
+
+/** False where a turn was not taken, and the hooks after this one are to send it, or where a lock taken without waiting was held. */
+async function readThread(input: HookInput, path: string, settings: Settings, deps: Deps, send: Send, waitMs: number): Promise<boolean> {
   const name = stateName(input.sessionId, input.threadId);
   let going = true;
-  const locked = await withLock(settings.dir, name, lockWaitOf(input, deps), async () => {
+  const locked = await withLock(settings.dir, name, waitMs, async () => {
     going = await readLocked(input, path, name, settings, deps, send);
   });
-  if (!locked) deps.log('busy: another hook of this thread held its lock past the wait; the next hook sends');
+  if (!locked) {
+    if (waitMs === 0) return false;
+    deps.log('busy: another hook of this thread held its lock past the wait; the next hook sends');
+  }
   return going;
 }
 

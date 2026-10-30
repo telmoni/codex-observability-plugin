@@ -232,6 +232,31 @@ describe('a hook', () => {
     expect(sent.map((run) => run.runId)).toEqual(runIds(A, B, C, E, F));
   });
 
+  it('leaves what a session’s end could not send to the next hook of any session, which sends it', async () => {
+    answers = [false];
+    await hook('SessionEnd', writtenThrough(paginated.length));
+    expect(sent).toEqual([]);
+    expect(existsSync(join(settings.dir, `${SESSION}.left`))).toBe(true);
+    const other = readMeta(fixture('legacy'))!.sessionId;
+    const otherPath = join(dir.path, 'other.jsonl');
+    writeFileSync(otherPath, readFileSync(fixture('legacy'), 'utf8'));
+    await hook('Stop', otherPath, undefined, {}, { sessionId: other, threadId: other });
+    const ids = sent.map((record) => record.runId);
+    expect(ids).toEqual(expect.arrayContaining(runIds(A, B, C)));
+    expect(sent.some((record) => record.sessionId === other)).toBe(true);
+    expect(existsSync(join(settings.dir, `${SESSION}.left`))).toBe(false);
+  });
+
+  it('keeps what a session’s end left while the platform stays away', async () => {
+    answers = [false];
+    await hook('SessionEnd', writtenThrough(paginated.length));
+    const other = readMeta(fixture('legacy'))!.sessionId;
+    const otherPath = join(dir.path, 'other.jsonl');
+    writeFileSync(otherPath, readFileSync(fixture('legacy'), 'utf8'));
+    await hook('Stop', otherPath, undefined, { sender: () => ({ send: (record) => Promise.resolve(record.sessionId === other), close: () => Promise.resolve() }) }, { sessionId: other, threadId: other });
+    expect(existsSync(join(settings.dir, `${SESSION}.left`))).toBe(true);
+  });
+
   it('reads on from where the last hook stopped, never before it', async () => {
     const path = writtenThrough(paginated.length);
     const atE = Buffer.byteLength(paginated.slice(0, opening(paginated, E)).map(({ text }) => `${text}\n`).join(''));
