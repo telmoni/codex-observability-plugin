@@ -5,7 +5,7 @@ import { Telmoni } from 'telmoni';
 import type { ModelCallRecord, RunRecord, ToolCallRecord } from 'telmoni';
 import { describe, expect, it } from 'vitest';
 
-import { AGENT, type Ending, MAX_CALLS, hasWork, recordOf, runIdOf, uuid5 } from '../src/record';
+import { AGENT, type Ending, hasWork, recordOf, runIdOf, uuid5 } from '../src/record';
 import { type Event, type Line, type Meta, Reader, type Usage, readMeta } from '../src/rollout';
 import { type Turn, Turns, mintedAt } from '../src/turns';
 import { CONTENT, fixture, fixtureLines, payloadOf, tempDir } from './helpers';
@@ -403,24 +403,24 @@ describe('a turn whose clock was set back while it ran', () => {
   });
 });
 
-describe('a turn of more calls than a run holds', () => {
-  it('is a run of its earliest, ending as the turn did', () => {
+describe('a turn of more than ten thousand calls', () => {
+  it('is a run of every call, in the order they started, ending as the turn did', () => {
     const meta: Meta = { threadId: 't', sessionId: 't', created: at(0), derived: false, ownFrom: undefined, provider: 'openai' };
     let place = 0;
     const line = (event: Event): Line => ({ start: place, end: ++place, time: at(1) + place, ordinal: undefined, event });
     const turns = new Turns(meta, new Set(), undefined, { offset: 0, countKey: undefined, model: 'gpt-5.5-codex' });
     const lines = [line({ kind: 'start', turnId: 'turn' })];
     // Each call its own response: the model asks, the tool answers.
-    for (let index = 0; index < MAX_CALLS / 2 + 25; index++) {
+    for (let index = 0; index < 10_000 / 2 + 25; index++) {
       lines.push(line({ kind: 'call', callId: `c${index}`, name: 'exec_command', inPlace: false, outcome: undefined }));
       lines.push(line({ kind: 'result', callId: `c${index}` }));
     }
     lines.push(line({ kind: 'complete', turnId: 'turn', errorType: undefined }));
     const [closed] = lines.flatMap((each) => turns.push(each));
-    expect(closed!.responses.length + closed!.calls.size).toBe(MAX_CALLS + 50);
+    expect(closed!.responses.length + closed!.calls.size).toBe(10_000 + 50);
     const run = recordOf(closed!, { sessionId: 's', provider: 'openai', model: undefined })!;
     const starts = [...closed!.responses.map((each) => each.start), ...[...closed!.calls.values()].map((each) => each.start)];
-    expect((run.inside ?? []).map((item) => Number(item.start))).toEqual(starts.sort((a, b) => a - b).slice(0, MAX_CALLS));
+    expect((run.inside ?? []).map((item) => Number(item.start))).toEqual(starts.sort((a, b) => a - b));
     expect(run.end).toBe(at(1) + place);
   });
 });

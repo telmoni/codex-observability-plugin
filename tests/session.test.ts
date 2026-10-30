@@ -5,7 +5,7 @@ import type { RunRecord } from 'telmoni';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { HookEvent, HookInput } from '../src/input';
-import { MAX_CALLS, runIdOf } from '../src/record';
+import { runIdOf } from '../src/record';
 import { readMeta } from '../src/rollout';
 import { Sender } from '../src/send';
 import { type Deps, sync } from '../src/session';
@@ -257,6 +257,15 @@ describe('a hook', () => {
     expect(existsSync(join(settings.dir, `${SESSION}.left`))).toBe(true);
   });
 
+  it('sweeps at a session’s end the states of threads whose rollout is gone, and keeps the rest', async () => {
+    writeState(settings.dir, 'gone-session', { offset: 10, path: join(dir.path, 'archived.jsonl') });
+    writeState(settings.dir, 'kept-session', { offset: 10, path: writtenThrough(3, paginated, 'kept.jsonl') });
+    writeState(settings.dir, 'no-rollout-yet', { offset: 0, warnedNoKey: true });
+    await hook('SessionEnd', writtenThrough(paginated.length));
+    const states = readdirSync(settings.dir).filter((name) => name.endsWith('.json')).sort();
+    expect(states).toEqual([`${SESSION}.json`, 'kept-session.json', 'no-rollout-yet.json']);
+  });
+
   it('reads on from where the last hook stopped, never before it', async () => {
     const path = writtenThrough(paginated.length);
     const atE = Buffer.byteLength(paginated.slice(0, opening(paginated, E)).map(({ text }) => `${text}\n`).join(''));
@@ -386,11 +395,11 @@ describe('a hook', () => {
     expect(readState(settings.dir, SESSION).offset).toBe(readFileSync(path).length);
   }, 30_000);
 
-  it('sends a turn of more calls than a run holds as a run of its earliest, and says how many it left out', async () => {
+  it('sends a turn of more than ten thousand calls whole, as the other plugins send one', async () => {
     const turnId = '0190a000-2000-7000-8000-000000000000';
     const at = (ms: number): string => new Date(Date.UTC(2026, 9, 12, 10) + ms).toISOString();
     const lines: string[] = [paginated[0]!.text, JSON.stringify({ timestamp: at(0), type: 'event_msg', payload: { type: 'task_started', turn_id: turnId } })];
-    const asks = MAX_CALLS / 2 + 1;
+    const asks = 10_000 / 2 + 1;
     for (let i = 0; i < asks; i++) {
       lines.push(
         JSON.stringify({ timestamp: at(10 * i + 1), type: 'response_item', payload: { type: 'function_call', name: 'exec_command', arguments: '{}', call_id: `c${i}` } }),
@@ -401,8 +410,8 @@ describe('a hook', () => {
     const path = join(dir.path, 'rollout.jsonl');
     writeFileSync(path, lines.map((line) => `${line}\n`).join(''));
     await hook('Stop', path, turnId);
-    expect(sent.map((run) => [run.runId, run.inside?.length])).toEqual([[runIdOf(SESSION, turnId), MAX_CALLS]]);
-    expect(logged).toEqual([`turn too long: 2 of its ${MAX_CALLS + 2} calls, the latest, not sent`]);
+    expect(sent.map((run) => [run.runId, run.inside?.length])).toEqual([[runIdOf(SESSION, turnId), 2 * asks]]);
+    expect(logged).toEqual([]);
   }, 30_000);
 
   it('sends nothing without a key, and says so once', async () => {

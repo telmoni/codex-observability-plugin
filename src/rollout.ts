@@ -88,7 +88,9 @@ export function fieldsOf(value: unknown): Fields | undefined {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Fields) : undefined;
 }
 
-const ID = /^[\w.:-]{1,128}$/;
+/** A turn's, a call's, a response's or a thread's id, as the rollout and the hook's input give one. */
+export const TURN_ID = /^[\w.:-]{1,128}$/;
+const ID = TURN_ID;
 
 /** A turn's, a call's, a response's or a thread's id. */
 function idOf(value: unknown): string | undefined {

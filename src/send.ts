@@ -6,8 +6,6 @@
 import { Telmoni } from 'telmoni';
 import type { RunRecord } from 'telmoni';
 
-import { MAX_CALLS } from './record.js';
-
 /** The SDK's batch, which it sends one at a time: well inside ingest's caps on an export, 1,000 spans and a mebibyte. */
 const BATCH_SPANS = 512;
 /** How often the SDK tries a batch before it drops it; it exports none of the limits restated here. */
@@ -20,8 +18,6 @@ const RETRY_AFTER_SECONDS = 60;
 const BATCH_SECONDS = ATTEMPTS * ATTEMPT_SECONDS + (ATTEMPTS - 1) * RETRY_AFTER_SECONDS;
 /** Beyond the batches' worst case, so a turn's flush ends on the platform's answer rather than before it. */
 const FLUSH_MARGIN_SECONDS = 30;
-/** A record is queued whole: the run, its start and every call, past the SDK's own 2,048. */
-const QUEUE_SPANS = MAX_CALLS + 2;
 /**
  * The SDK's warnings of spans it could not deliver, which a later hook may yet get through: Telmoni out of reach or busy
  * past its retries, or a key or an endpoint it refused. Every other warning is of bytes delivered, or refused for good.
@@ -53,7 +49,8 @@ function clientOf(destination: Destination, release?: string): Client {
     { endpoint: destination.endpoint, apiKey: destination.apiKey, ...(release === undefined ? {} : { release }) },
     {
       warn: (message) => void warnings.push(message),
-      processor: { maxQueueSize: QUEUE_SPANS, maxBatchSize: BATCH_SPANS },
+      // Unbounded, as the other plugins' are: the SDK queues a record whole, and a turn past its own 2,048 spans would be refused on every hook.
+      processor: { maxQueueSize: Number.POSITIVE_INFINITY, maxBatchSize: BATCH_SPANS },
     },
   );
   return { telmoni, warnings };

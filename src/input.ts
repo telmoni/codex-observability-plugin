@@ -2,7 +2,7 @@
 
 import { isAbsolute } from 'node:path';
 
-import { fieldsOf, nameOf } from './rollout.js';
+import { TURN_ID, fieldsOf, nameOf } from './rollout.js';
 
 export type HookEvent = 'Stop' | 'SubagentStop' | 'Interrupt' | 'SessionEnd';
 
@@ -25,7 +25,6 @@ const EVENTS = new Set<HookEvent>(['Stop', 'SubagentStop', 'Interrupt', 'Session
 
 /** A session or thread id names a file here: anything but a plain id is refused. */
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
-const TURN_ID = /^[\w.:-]{1,128}$/;
 
 export function isId(value: unknown): value is string {
   return typeof value === 'string' && ID.test(value);

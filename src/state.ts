@@ -6,6 +6,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   closeSync,
+  existsSync,
   fsyncSync,
   mkdirSync,
   openSync,
@@ -102,6 +103,36 @@ export function leftSessions(dir: string): string[] {
     }
   };
   return marked.sort((a, b) => waited(a) - waited(b) || a.localeCompare(b));
+}
+
+/**
+ * The states of threads whose rollout is gone, as a session archived or deleted takes its own: nothing is left to read.
+ * Never a state for its age alone, since one read as missing would send a resumed thread again from the top.
+ */
+export async function sweepGone(dir: string): Promise<void> {
+  let names: string[] = [];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return;
+  }
+  const gone = (name: string): boolean => {
+    const { path } = readState(dir, name);
+    return path !== undefined && !existsSync(path);
+  };
+  for (const file of names) {
+    if (!file.endsWith('.json')) continue;
+    const name = file.slice(0, -'.json'.length);
+    try {
+      if (!gone(name)) continue;
+      // Taken without waiting, and looked at again under it: a hook at work on the thread keeps its state.
+      await withLock(dir, name, 0, async () => {
+        if (gone(name)) rmSync(join(dir, file), { force: true });
+      });
+    } catch {
+      // A state that cannot be read is left as it is, as every hook leaves one.
+    }
+  }
 }
 
 /** A thread's state: afresh only where none was saved, since one read as new would send the thread again from the top. */

@@ -10,11 +10,11 @@ import type { RunRecord } from 'telmoni';
 
 import type { HookInput } from './input.js';
 import { kindOf } from './log.js';
-import { type Context, type Ending, MAX_CALLS, hasWork, recordOf } from './record.js';
+import { type Context, type Ending, hasWork, recordOf } from './record.js';
 import { type Meta, Reader, readMeta, readsAsBefore } from './rollout.js';
 import type { Destination } from './send.js';
 import type { Settings } from './settings.js';
-import { type ThreadState, leftSessions, markLeft, readState, stateName, subagentsOf, withLock, writeState } from './state.js';
+import { type ThreadState, leftSessions, markLeft, readState, stateName, subagentsOf, sweepGone, withLock, writeState } from './state.js';
 import { type Checkpoint, type Turn, Turns } from './turns.js';
 
 export interface Deps {
@@ -91,6 +91,7 @@ export async function sync(input: HookInput, settings: Settings, deps: Deps): Pr
     if (input.event === 'SessionEnd') {
       reached = await endSession(input, input.rolloutPath, settings, deps, send, waitMs);
       markLeft(settings.dir, input.sessionId, !reached);
+      await sweepGone(settings.dir);
     } else {
       reached = await readThread(input, input.rolloutPath, settings, deps, send, waitMs);
     }
@@ -212,8 +213,6 @@ async function readLocked(
   // A turn with the model's work in it is sent; one the platform did not take is read again from its opening by the next hook.
   const finish = async (turn: Turn, ending?: Ending): Promise<boolean> => {
     if (hasWork(turn)) {
-      const calls = turn.responses.length + turn.calls.size;
-      if (calls > MAX_CALLS) deps.log(`turn too long: ${calls - MAX_CALLS} of its ${calls} calls, the latest, not sent`);
       const record = recordOf(turn, context, ending);
       if (record !== undefined && !(await send(record, context.release))) {
         save(turn.before);

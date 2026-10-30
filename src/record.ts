@@ -99,8 +99,6 @@ function modelOf(name: string): string {
   return PATH.test(trimmed) ? 'unknown' : cut(trimmed, MODEL_MAX);
 }
 
-/** The most calls a run holds, its earliest: the SDK queues a record whole, and a turn past its queue would be cut short on every hook, never taken. */
-export const MAX_CALLS = 10_000;
 
 /** Whether the turn holds any of the model's work, which is what makes it a run. */
 export function hasWork(turn: Turn): boolean {
@@ -145,7 +143,7 @@ export function recordOf(turn: Turn, context: Context, ending?: Ending): RunReco
   // In the order they started, so the record and the ids derived from each span's place come out the same however the lines were written.
   const order = new Map(items.map((item, index) => [item, index]));
   items.sort((a, b) => Number(a.start) - Number(b.start) || order.get(a)! - order.get(b)!);
-  const inside = items.slice(0, MAX_CALLS);
+  const inside = items;
   const record: RunRecord = {
     runId: runIdOf(context.sessionId, turn.id),
     agent: AGENT,
