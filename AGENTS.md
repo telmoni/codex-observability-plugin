@@ -5,6 +5,7 @@ The Codex plugin for Telmoni ([`telmoni/codex-observability-plugin`](https://git
 ## Ground Rules
 - **Pre-launch:** nothing has shipped. Change the record, the state and the manifests to their ideal state; no migration paths.
 - **Quality gate:** never weaken a test or leave the tree broken.
+- **Build only what is asked:** the smallest change that does the task, in the files that already hold it. No feature, option, abstraction, layer, helper or file for a need that is not here yet, and no refactor beyond the task (a split, a rename, a rewrite for style): propose it with what it costs, and wait. A new repository, package, service or workflow is the owner's to make.
 - **Ask first:** any dependency change (an edit to `package.json` or `package-lock.json`, lockfile-only refreshes included) and any external-state change (publishing to npm, a listing in a vendor's directory, a call to a live Telmoni with a real key).
 - **Metadata only, by construction:** a record holds a model, token counts, tool names, times and outcomes. Never a prompt, a reply, a thought or its summary, a tool's arguments or output, a command, a file's path, the working folder or an email — the hook picks what it keeps out of each line by field name, and keeps nothing else.
 - **The session never waits:** the hook hands its work to a detached copy of itself and exits at once, printing nothing, since Codex reads a `Stop` hook's output as its decision; a failure is a line in `hook.log` naming its kind, never anything from the session, and the hook exits 0 whatever happened.
