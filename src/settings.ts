@@ -1,11 +1,12 @@
 /**
  * Where the plugin sends and keeps its state: `TELMONI_API_KEY` and `TELMONI_ENDPOINT` as Codex hands its hooks them,
- * else the plugin's own `~/.codex/telmoni.json`, since Codex keeps no settings for a plugin's hooks.
+ * else the plugin's own `~/.codex/telmoni.json`, since Codex keeps no settings for a plugin's hooks; a key always with
+ * the endpoint named beside it.
  */
 
 import { closeSync, constants, fstatSync, openSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 
 import { kindOf } from './log.js';
 import { fieldsOf } from './rollout.js';
@@ -70,20 +71,17 @@ function fromFile(path: string): { apiKey?: string | undefined; endpoint?: strin
 }
 
 export function settingsFrom(env: NodeJS.ProcessEnv): Settings {
-  // Beside the rollouts of whichever folder Codex runs with, `CODEX_HOME` or `~/.codex`, so two installations keep two states.
-  const home = value(env['CODEX_HOME']);
+  // Beside the rollouts of whichever folder Codex runs with, `CODEX_HOME` or `~/.codex`, so two installations keep two
+  // states; a relative one would put them under the session's working folder.
+  const given = value(env['CODEX_HOME']);
+  const home = given !== undefined && isAbsolute(given) ? given : undefined;
   const codex = home ?? join(homedir(), '.codex');
-  const settings: Settings = {
-    apiKey: value(env['TELMONI_API_KEY']),
-    endpoint: value(env['TELMONI_ENDPOINT']),
-    dir: join(codex, 'telmoni'),
-    keyFileName: home === undefined ? '~/.codex/telmoni.json' : '$CODEX_HOME/telmoni.json',
-  };
-  // Both in the environment: the file is not read at all.
-  if (settings.apiKey !== undefined && settings.endpoint !== undefined) return settings;
+  const base = { dir: join(codex, 'telmoni'), keyFileName: home === undefined ? '~/.codex/telmoni.json' : '$CODEX_HOME/telmoni.json' };
+  const apiKey = value(env['TELMONI_API_KEY']);
+  // A key goes only to the endpoint named beside it: the environment's with the environment's, the file's with the file's.
+  if (apiKey !== undefined) return { ...base, apiKey, endpoint: value(env['TELMONI_ENDPOINT']) };
   const file = fromFile(join(codex, 'telmoni.json'));
-  settings.apiKey ??= file.apiKey;
-  settings.endpoint ??= file.endpoint;
+  const settings: Settings = { ...base, apiKey: file.apiKey, endpoint: file.endpoint };
   if (file.problem !== undefined) settings.keyFileProblem = file.problem;
   return settings;
 }

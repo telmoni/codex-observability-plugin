@@ -454,14 +454,15 @@ describe('a hook', () => {
     expect(logged).toEqual([expect.stringMatching(/^no key/) as unknown]);
   });
 
-  it('sends nothing past a key file it passed over, though the key is in its environment, and says why once', async () => {
-    // The file may have named a self-hosted endpoint: the key must not go to the default instead.
+  it('sends nothing past a key file it passed over, and says why once', async () => {
+    // The file may have named a self-hosted endpoint: its key must not go to the default instead.
+    settings.apiKey = undefined;
     settings.keyFileProblem = 'open to other users; chmod 600 it';
     settings.keyFileName = '$CODEX_HOME/telmoni.json';
     await hook('Stop', writtenThrough(paginated.length), F);
     await hook('Stop', writtenThrough(paginated.length), F);
     expect(sent).toEqual([]);
-    expect(logged).toEqual(['$CODEX_HOME/telmoni.json not used (open to other users; chmod 600 it): fix it, or set both TELMONI_API_KEY and TELMONI_ENDPOINT; nothing is sent until then']);
+    expect(logged).toEqual(['$CODEX_HOME/telmoni.json not used (open to other users; chmod 600 it): fix it, or set TELMONI_API_KEY, with TELMONI_ENDPOINT for a Telmoni of your own; nothing is sent until then']);
   });
 
   it('says each reason once a thread, though turns are sent and saved between', async () => {
