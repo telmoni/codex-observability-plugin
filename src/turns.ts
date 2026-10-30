@@ -61,6 +61,19 @@ export function mintedAt(id: string): number | undefined {
   return V7.test(id) ? Number.parseInt(id.slice(0, 8) + id.slice(9, 13), 16) : undefined;
 }
 
+/** The one call work started and ended inside, from the model's asking to its answer; none where two could hold it. */
+function ranInside(turn: Turn, from: number | undefined, to: number | undefined): ToolCall | undefined {
+  if (from === undefined) return undefined;
+  const until = to ?? from;
+  let inside: ToolCall | undefined;
+  for (const call of turn.calls.values()) {
+    if (call.start > from || (call.answeredAt !== undefined && until > call.answeredAt)) continue;
+    if (inside !== undefined) return undefined;
+    inside = call;
+  }
+  return inside;
+}
+
 export class Turns {
   readonly #meta: Meta;
   readonly #sent: ReadonlySet<string>;
@@ -217,10 +230,13 @@ export class Turns {
         this.#seal(turn);
         break;
       case 'done': {
-        const call = turn.calls.get(event.callId);
+        const own = turn.calls.get(event.callId);
+        // Codex's `exec` records the work it runs under ids of their own: its outcome is the call's it ran inside, its times not.
+        const call = own ?? ranInside(turn, event.startMs, event.endMs);
         if (call === undefined) break;
-        if (event.name !== undefined) call.name = event.name;
         if (event.outcome !== undefined) call.outcome = event.outcome;
+        if (own === undefined) break;
+        if (event.name !== undefined) call.name = event.name;
         call.ranFrom = event.startMs ?? call.ranFrom;
         call.ranTo = event.endMs ?? call.ranTo;
         call.ranMs = event.durationMs ?? call.ranMs;

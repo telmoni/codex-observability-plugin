@@ -131,12 +131,16 @@ export function recordOf(turn: Turn, context: Context, ending?: Ending): RunReco
     }
     items.push(call);
   });
+  const lastOutput = turn.responses.at(-1)?.end ?? -Infinity;
   for (const tool of turn.calls.values()) {
     const from = tool.ranFrom ?? tool.start;
     const to = tool.ranTo ?? (tool.ranMs !== undefined ? from + tool.ranMs : tool.answeredAt);
     const call: ToolCallRecord = { type: 'tool_call', name: cut(tool.name, NAME_MAX), start: from, end: Math.max(from, to ?? until) };
+    // Answered after the model's last output in a turn cut short, with no outcome or run of its own: Codex stopped it.
+    const cutShort =
+      outcome.cancelled === true && tool.outcome === undefined && tool.ranFrom === undefined && tool.ranMs === undefined && tool.answeredAt !== undefined && tool.answeredAt > lastOutput;
     // Declined, or never answered because the turn was interrupted, or ended, first.
-    if (to === undefined || tool.outcome === 'cancelled') call.cancelled = true;
+    if (to === undefined || tool.outcome === 'cancelled' || cutShort) call.cancelled = true;
     else if (tool.outcome === 'failed') call.errorType = 'ToolError';
     items.push(call);
   }

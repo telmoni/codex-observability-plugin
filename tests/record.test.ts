@@ -425,6 +425,69 @@ describe('a turn of more than ten thousand calls', () => {
   });
 });
 
+describe('a turn of Codex’s `exec`, whose work is recorded under ids of its own', () => {
+  const meta: Meta = { threadId: 't', sessionId: 't', created: at(0), derived: false, ownFrom: undefined, provider: 'openai' };
+  const line = (seconds: number, event: Event): Line => ({ start: seconds, end: seconds + 1, time: at(seconds), ordinal: undefined, event });
+  const call = (seconds: number, callId: string): Line => line(seconds, { kind: 'call', callId, name: 'exec', inPlace: false, outcome: undefined });
+  const result = (seconds: number, callId: string): Line => line(seconds, { kind: 'result', callId });
+  const ran = (seconds: number, callId: string, from: number, to: number, outcome?: 'failed'): Line =>
+    line(seconds, { kind: 'done', callId, name: undefined, outcome, startMs: at(from), endMs: at(to), durationMs: undefined });
+  const stopped = (seconds: number): Line => line(seconds, { kind: 'aborted', turnId: 'turn', reason: 'interrupted', errorType: undefined });
+  const toolsOf = (lines: Line[]): Array<[number | Date | undefined, string | undefined, boolean | undefined]> => {
+    const turns = new Turns(meta, new Set(), undefined, { offset: 0, countKey: undefined, model: 'gpt-5.5-codex' });
+    const [closed] = [line(1, { kind: 'start', turnId: 'turn' }), ...lines].flatMap((each) => turns.push(each));
+    const run = recordOf(closed!, { sessionId: 's', provider: 'openai', model: undefined })!;
+    expect(run.cancelled).toBe(true);
+    return toolCalls(run).map((tool) => [tool.start, tool.errorType, tool.cancelled]);
+  };
+
+  it('fails a call by a command that failed inside it, and cancels the one answered after the turn’s last output', () => {
+    expect(
+      toolsOf([
+        call(2, 'failing'),
+        ran(3, 'exec-a', 2.1, 2.5, 'failed'),
+        result(4, 'failing'),
+        call(5, 'fine'),
+        result(6, 'fine'),
+        ran(7, 'exec-b', 5.1, 5.5),
+        // Left running in the background as its call answered, and killed once the turn was stopped.
+        call(8, 'background'),
+        result(9, 'background'),
+        call(10, 'stopped'),
+        ran(11, 'exec-c', 8.1, 10.5, 'failed'),
+        result(12, 'stopped'),
+        stopped(13),
+        ran(14, 'exec-d', 8.1, 14, 'failed'),
+      ]),
+    ).toEqual([
+      [at(2), 'ToolError', undefined],
+      [at(5), undefined, undefined],
+      [at(8), undefined, undefined],
+      [at(10), undefined, true],
+    ]);
+  });
+
+  it('gives no call work two open calls could hold, and keeps a call’s own completion, its outcome and its times', () => {
+    expect(
+      toolsOf([
+        call(2, 'left'),
+        call(2.5, 'right'),
+        ran(3, 'exec-a', 2.6, 3, 'failed'),
+        result(4, 'left'),
+        result(4.5, 'right'),
+        call(5, 'own'),
+        ran(6, 'own', 5.1, 5.5, 'failed'),
+        result(7, 'own'),
+        stopped(8),
+      ]),
+    ).toEqual([
+      [at(2), undefined, undefined],
+      [at(2.5), undefined, undefined],
+      [at(5.1), 'ToolError', undefined],
+    ]);
+  });
+});
+
 describe('a name past ingest’s caps', () => {
   it('is cut to them by character, never inside one: a tool’s to 145, a model’s to 128', () => {
     const meta: Meta = { threadId: 't', sessionId: 't', created: at(0), derived: false, ownFrom: undefined, provider: 'openai' };
