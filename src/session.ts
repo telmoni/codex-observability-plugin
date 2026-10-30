@@ -18,7 +18,7 @@ import { type ThreadState, leftSessions, markLeft, readState, stateName, subagen
 import { type Checkpoint, type Turn, Turns } from './turns.js';
 
 export interface Deps {
-  sender: (destination: Destination) => { send(record: RunRecord): Promise<boolean>; close(): Promise<void> };
+  sender: (destination: Destination) => { send(record: RunRecord, release?: string): Promise<boolean>; close(): Promise<void> };
   log: (line: string) => void;
   /** How long a stopped turn's closing line is waited for with no news of the turn, and how often the rollout is looked at meanwhile. */
   closeWaitMs?: number;
@@ -38,7 +38,7 @@ const LOCK_WAIT_MS = CLOSE_WAIT_MS + 2 * 60_000;
 /** How often the place reached is saved while turns are sent; a turn sent again after a crash is stored once. */
 const SAVE_EVERY_MS = 1_000;
 
-type Send = (record: RunRecord) => Promise<boolean>;
+type Send = (record: RunRecord, release?: string) => Promise<boolean>;
 
 /** How long a hook waits for its thread's lock: the session's end, which no hook follows, outwaits any live holder. */
 function lockWaitOf(input: HookInput, deps: Deps): number {
@@ -84,7 +84,7 @@ export async function sync(input: HookInput, settings: Settings, deps: Deps): Pr
     await logOnce(settings, input, 'warnedEndpoint', `${line}; nothing is sent until then`, deps);
     return;
   }
-  const send: Send = (record) => sender.send(record);
+  const send: Send = (record, release) => sender.send(record, release);
   try {
     const waitMs = lockWaitOf(input, deps);
     let reached: boolean;
@@ -195,6 +195,7 @@ async function readLocked(
   const sent = new Set(state.sent);
   const turns = new Turns(meta, sent, input.turnId, from);
   const context: Context = { sessionId: input.sessionId, provider: meta.provider, model: input.model };
+  if (meta.version !== undefined) context.release = meta.version;
   let saved = Date.now();
   const save = (at: Checkpoint): void => {
     const next: ThreadState = { offset: at.offset, path, sent: [...sent] };
@@ -214,7 +215,7 @@ async function readLocked(
       const calls = turn.responses.length + turn.calls.size;
       if (calls > MAX_CALLS) deps.log(`turn too long: ${calls - MAX_CALLS} of its ${calls} calls, the latest, not sent`);
       const record = recordOf(turn, context, ending);
-      if (record !== undefined && !(await send(record))) {
+      if (record !== undefined && !(await send(record, context.release))) {
         save(turn.before);
         return false;
       }

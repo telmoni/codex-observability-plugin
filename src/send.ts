@@ -47,10 +47,10 @@ interface Client {
   warnings: string[];
 }
 
-function clientOf(destination: Destination): Client {
+function clientOf(destination: Destination, release?: string): Client {
   const warnings: string[] = [];
   const telmoni = new Telmoni(
-    { endpoint: destination.endpoint, apiKey: destination.apiKey },
+    { endpoint: destination.endpoint, apiKey: destination.apiKey, ...(release === undefined ? {} : { release }) },
     {
       warn: (message) => void warnings.push(message),
       processor: { maxQueueSize: QUEUE_SPANS, maxBatchSize: BATCH_SPANS },
@@ -75,10 +75,13 @@ export class Sender {
    * Whether the turn is done with: taken, whole or in part, or refused for good, which the same bytes would get on every
    * hook. The SDK's warnings, logged as they are, never carry anything of the session.
    */
-  async send(record: RunRecord): Promise<boolean> {
+  async send(record: RunRecord, release?: string): Promise<boolean> {
     // A client of its own: the SDK warns of each kind once a client, and a turn refused as one before it, unwarned, would read as taken.
-    const { telmoni, warnings } = this.#first ?? clientOf(this.#destination);
+    const first = this.#first;
     this.#first = undefined;
+    // The first client names no release: a turn that has one gets a client of its own.
+    if (first !== undefined && release !== undefined) await first.telmoni.shutdown();
+    const { telmoni, warnings } = first !== undefined && release === undefined ? first : clientOf(this.#destination, release);
     try {
       try {
         telmoni.recordRun(record);

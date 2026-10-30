@@ -16,7 +16,7 @@ Codex ──(Stop, SubagentStop, Interrupt, SessionEnd)──▶ node dist/hook.
                                        then saves the offset past it
 ```
 
-A turn of the agent is a run of `codex`; Codex's session id is the run's session, so a session reads in the console as a session of traces. Each response of the model is a model call, and each tool call a tool call; a subagent's turns are runs of the same session. Codex's own OpenTelemetry export (`[otel]`) is not used: a plugin cannot set it, its logs carry the person's email and a tool's arguments, and its traces are Codex's internal span tree, with no turn's tokens, tools and outcome in one place.
+A turn of the agent is a run of `codex`; Codex's session id is the run's session, so a session reads in the console as a session of traces. Each response of the model is a model call, and each tool call a tool call; a subagent's turns are runs of the same session. The run's release is the Codex that wrote the rollout, its first line's `cli_version`, where that is a plain version. Codex's own OpenTelemetry export (`[otel]`) is not used: a plugin cannot set it, its logs carry the person's email and a tool's arguments, and its traces are Codex's internal span tree, with no turn's tokens, tools and outcome in one place.
 
 ## A hook that never holds the session
 

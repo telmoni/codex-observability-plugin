@@ -158,6 +158,16 @@ describe('the hook', () => {
     expect(tools).toContain(`mcp__${server}__search`.slice(0, 145));
     const models = new Set(spans.map((span) => attributesOf(span)['gen_ai.request.model']).filter((name) => name !== undefined));
     expect([...models]).toEqual([model.slice(0, 128)]);
+    // The Codex that wrote the rollout, as each run's release.
+    type Resource = { resource: { attributes: Array<{ key: string; value: { stringValue?: string } }> } };
+    const releases = new Set(
+      ingest.received.flatMap((request) =>
+        (JSON.parse(request.body) as { resourceSpans: Resource[] }).resourceSpans.map(
+          (spans) => spans.resource.attributes.find((attribute) => attribute.key === 'service.version')?.value.stringValue,
+        ),
+      ),
+    );
+    expect([...releases]).toEqual(['0.162.1']);
     expect(existsSync(join(codex, 'telmoni', 'hook.log'))).toBe(false);
   }, 30_000);
 

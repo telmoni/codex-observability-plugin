@@ -41,6 +41,8 @@ export interface Context {
   provider: string | undefined;
   /** The model the hook names, for a turn whose rollout names none. */
   model: string | undefined;
+  /** The Codex that wrote the turn, sent as the run's release. */
+  release?: string;
 }
 
 interface RunOutcome {

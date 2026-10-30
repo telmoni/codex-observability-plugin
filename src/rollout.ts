@@ -28,6 +28,8 @@ export interface Meta {
   ownFrom: number | undefined;
   /** Whoever serves the model, as Codex names its provider. */
   provider: string | undefined;
+  /** The Codex that wrote the rollout (`cli_version`), sent as each run's release. */
+  version?: string;
 }
 
 /** What a line says, as far as the plugin reads it. */
@@ -383,14 +385,19 @@ function messageEvent(message: Fields): Event {
   }
 }
 
+/** A plain version, as Codex writes its own: never anything longer or stranger. */
+const VERSION = /^[\w.+-]{1,64}$/;
+
 function metaOf(meta: Fields): Event {
   const threadId = idOf(meta['id']);
   if (threadId === undefined) return OTHER;
   const ownFrom = meta['subagent_history_start_ordinal'];
   const present = (value: unknown): boolean => value !== null && value !== undefined;
+  const version = meta['cli_version'];
   return {
     kind: 'meta',
     meta: {
+      ...(typeof version === 'string' && VERSION.test(version) ? { version } : {}),
       threadId,
       sessionId: idOf(meta['session_id']) ?? threadId,
       created: timeOf(meta['timestamp']),

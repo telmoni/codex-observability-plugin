@@ -92,7 +92,7 @@ describe('a rollout', () => {
 
   it('names its thread on its first line: the session, and whether it began from another', () => {
     const paginated = readMeta(fixture('paginated'))!;
-    expect(paginated).toMatchObject({ derived: false, ownFrom: undefined, provider: 'openai' });
+    expect(paginated).toMatchObject({ derived: false, ownFrom: undefined, provider: 'openai', version: '0.162.1' });
     expect(paginated.sessionId).toBe(paginated.threadId);
     const subagent = readMeta(fixture('subagent'))!;
     expect(subagent.derived).toBe(true);
