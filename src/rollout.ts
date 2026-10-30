@@ -112,9 +112,12 @@ function kindOf(value: unknown): string | undefined {
 
 const PROVIDER = /^[A-Za-z0-9][\w.-]{0,63}$/;
 
+/** Codex's provider ids where the GenAI conventions, and the price table, name the same service otherwise; any other goes as Codex gives it. */
+const PROVIDERS: ReadonlyMap<string, string> = new Map([['azure', 'azure.ai.openai']]);
+
 function providerOf(value: unknown): string | undefined {
   const name = nameOf(value);
-  return name !== undefined && PROVIDER.test(name) ? name : undefined;
+  return name !== undefined && PROVIDER.test(name) ? (PROVIDERS.get(name) ?? name) : undefined;
 }
 
 /**

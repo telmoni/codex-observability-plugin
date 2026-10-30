@@ -107,6 +107,19 @@ describe('a rollout', () => {
     expect(readMeta(path)).toBeUndefined();
   });
 
+  it('names the provider as the GenAI conventions name it, where Codex’s id for it differs', () => {
+    const path = join(dir.path, 'rollout.jsonl');
+    const metaLine = (provider: string): string =>
+      JSON.stringify({ timestamp: '2026-10-12T09:00:00.000Z', type: 'session_meta', payload: { id: '01a12f57-06f8-7000-8000-010123456789', model_provider: provider } });
+    const providerFor = (provider: string): string | undefined => {
+      writeFileSync(path, `${metaLine(provider)}\n`);
+      return readMeta(path)?.provider;
+    };
+    expect(providerFor('azure')).toBe('azure.ai.openai');
+    expect(providerFor('openai')).toBe('openai');
+    expect(providerFor('ollama')).toBe('ollama');
+  });
+
   it('keeps nothing of what was said: no text, no command, no path, no email', () => {
     for (const name of ['paginated', 'legacy', 'fork-legacy', 'subagent', 'fork-paginated']) {
       const kept = JSON.stringify(readAll(fixture(name)));
