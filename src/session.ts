@@ -13,8 +13,8 @@ import { kindOf } from './log.js';
 import { type Context, type Ending, hasWork, recordOf } from './record.js';
 import { type Meta, Reader, readMeta, readsAsBefore } from './rollout.js';
 import type { Destination } from './send.js';
-import type { Settings } from './settings.js';
-import { type ThreadState, leftSessions, markLeft, readState, stateName, subagentsOf, sweepGone, withLock, writeState } from './state.js';
+import { type Settings, destinationOf } from './settings.js';
+import { type ThreadState, leftSessions, markLeft, readLeft, readState, stateName, subagentsOf, withLock, writeState } from './state.js';
 import { type Checkpoint, type Turn, Turns } from './turns.js';
 
 export interface Deps {
@@ -90,10 +90,11 @@ export async function sync(input: HookInput, settings: Settings, deps: Deps): Pr
     let reached: boolean;
     if (input.event === 'SessionEnd') {
       reached = await endSession(input, input.rolloutPath, settings, deps, send, waitMs);
-      markLeft(settings.dir, input.sessionId, !reached);
-      await sweepGone(settings.dir);
+      markLeft(settings.dir, input.sessionId, reached ? undefined : { size: sizeOf(input.rolloutPath), destination: destinationOf(settings) });
     } else {
       reached = await readThread(input, input.rolloutPath, settings, deps, send, waitMs);
+      // A session resumed is no longer ended: its own hooks send what its end left.
+      if (reached) markLeft(settings.dir, input.sessionId, undefined);
     }
     if (reached) await sendLeft(input.sessionId, settings, deps, send);
   } finally {
@@ -121,10 +122,26 @@ async function endSession(input: HookInput, path: string, settings: Settings, de
   return true;
 }
 
-/** What other sessions' ends left, the longest waiting first, each lock taken without waiting, until one is still not taken. */
+/** A rollout's length now, or none where it is gone. */
+function sizeOf(path: string): number {
+  try {
+    return statSync(path).size;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * What other sessions' ends left, the longest waiting first, each lock taken without waiting, until one is still not
+ * taken: only where that session's key sent it, and only where it has not been resumed since, whose turns its own
+ * hooks send and whose live turn ending it again would cut short.
+ */
 async function sendLeft(own: string, settings: Settings, deps: Deps, send: Send): Promise<void> {
+  const destination = destinationOf(settings);
   for (const sessionId of leftSessions(settings.dir)) {
     if (sessionId === own) continue;
+    const left = readLeft(settings.dir, sessionId);
+    if (left === undefined || left.destination !== destination) continue;
     let path: string | undefined;
     try {
       ({ path } = readState(settings.dir, sessionId));
@@ -132,13 +149,13 @@ async function sendLeft(own: string, settings: Settings, deps: Deps, send: Send)
       deps.log(`session ${sessionId.slice(0, 8)}: state not read: ${kindOf(error)}`);
       continue;
     }
-    if (path === undefined) {
-      markLeft(settings.dir, sessionId, false);
+    if (path === undefined || sizeOf(path) !== left.size) {
+      markLeft(settings.dir, sessionId, undefined);
       continue;
     }
-    const left: HookInput = { event: 'SessionEnd', sessionId, threadId: sessionId, rolloutPath: path };
-    const reached = await endSession(left, path, settings, deps, send, 0);
-    markLeft(settings.dir, sessionId, !reached);
+    const ended: HookInput = { event: 'SessionEnd', sessionId, threadId: sessionId, rolloutPath: path };
+    const reached = await endSession(ended, path, settings, deps, send, 0);
+    if (reached) markLeft(settings.dir, sessionId, undefined);
     // The platform away again, or another hook at work on that session: the next hook tries again.
     if (!reached) return;
   }

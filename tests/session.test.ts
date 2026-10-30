@@ -247,6 +247,33 @@ describe('a hook', () => {
     expect(existsSync(join(settings.dir, `${SESSION}.left`))).toBe(false);
   });
 
+  it('never ends again a session resumed since its end, whose own hooks send what it left', async () => {
+    answers = [false];
+    const path = writtenThrough(opening(paginated, E));
+    await hook('SessionEnd', path);
+    expect(existsSync(join(settings.dir, `${SESSION}.left`))).toBe(true);
+    // Resumed: the rollout grows with a turn still running.
+    writtenThrough(opening(paginated, E) + 3);
+    const other = readMeta(fixture('legacy'))!.sessionId;
+    const otherPath = join(dir.path, 'other.jsonl');
+    writeFileSync(otherPath, readFileSync(fixture('legacy'), 'utf8'));
+    await hook('Stop', otherPath, undefined, {}, { sessionId: other, threadId: other });
+    expect(sent.filter((record) => record.sessionId === SESSION)).toEqual([]);
+    expect(existsSync(join(settings.dir, `${SESSION}.left`))).toBe(false);
+  });
+
+  it('sends what a session’s end left only where that session’s key sent', async () => {
+    answers = [false];
+    await hook('SessionEnd', writtenThrough(paginated.length));
+    const other = readMeta(fixture('legacy'))!.sessionId;
+    const otherPath = join(dir.path, 'other.jsonl');
+    writeFileSync(otherPath, readFileSync(fixture('legacy'), 'utf8'));
+    settings = { ...settings, endpoint: 'https://another.example' };
+    await hook('Stop', otherPath, undefined, {}, { sessionId: other, threadId: other });
+    expect(sent.filter((record) => record.sessionId === SESSION)).toEqual([]);
+    expect(existsSync(join(settings.dir, `${SESSION}.left`))).toBe(true);
+  });
+
   it('keeps what a session’s end left while the platform stays away', async () => {
     answers = [false];
     await hook('SessionEnd', writtenThrough(paginated.length));
@@ -255,15 +282,6 @@ describe('a hook', () => {
     writeFileSync(otherPath, readFileSync(fixture('legacy'), 'utf8'));
     await hook('Stop', otherPath, undefined, { sender: () => ({ send: (record) => Promise.resolve(record.sessionId === other), close: () => Promise.resolve() }) }, { sessionId: other, threadId: other });
     expect(existsSync(join(settings.dir, `${SESSION}.left`))).toBe(true);
-  });
-
-  it('sweeps at a session’s end the states of threads whose rollout is gone, and keeps the rest', async () => {
-    writeState(settings.dir, 'gone-session', { offset: 10, path: join(dir.path, 'archived.jsonl') });
-    writeState(settings.dir, 'kept-session', { offset: 10, path: writtenThrough(3, paginated, 'kept.jsonl') });
-    writeState(settings.dir, 'no-rollout-yet', { offset: 0, warnedNoKey: true });
-    await hook('SessionEnd', writtenThrough(paginated.length));
-    const states = readdirSync(settings.dir).filter((name) => name.endsWith('.json')).sort();
-    expect(states).toEqual([`${SESSION}.json`, 'kept-session.json', 'no-rollout-yet.json']);
   });
 
   it('reads on from where the last hook stopped, never before it', async () => {

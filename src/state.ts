@@ -6,7 +6,6 @@
 import { randomUUID } from 'node:crypto';
 import {
   closeSync,
-  existsSync,
   fsyncSync,
   mkdirSync,
   openSync,
@@ -76,14 +75,32 @@ export function subagentsOf(dir: string, sessionId: string): string[] {
     .sort();
 }
 
+/** What a session's end left: how long its rollout was then, and where its key sends (`destinationOf`). */
+export interface Left {
+  size: number;
+  destination: string;
+}
+
 /**
  * Marks, or unmarks, a session whose end met a turn the platform did not take: a session's end is its last hook, so the
  * next hook of any session sends what it left.
  */
-export function markLeft(dir: string, sessionId: string, left: boolean): void {
+export function markLeft(dir: string, sessionId: string, left: Left | undefined): void {
   const path = join(dir, `${sessionId}.left`);
-  if (left) writeFileSync(path, '', { mode: 0o600 });
+  if (left !== undefined) writeFileSync(path, JSON.stringify(left), { mode: 0o600 });
   else rmSync(path, { force: true });
+}
+
+/** What a session's end left, or nothing where its marker cannot be read. */
+export function readLeft(dir: string, sessionId: string): Left | undefined {
+  try {
+    const value = JSON.parse(readFileSync(join(dir, `${sessionId}.left`), 'utf8')) as Partial<Left> | null;
+    return value !== null && Number.isSafeInteger(value.size) && typeof value.destination === 'string'
+      ? { size: value.size as number, destination: value.destination }
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** The sessions whose end left turns unsent, the longest waiting first. */
@@ -103,36 +120,6 @@ export function leftSessions(dir: string): string[] {
     }
   };
   return marked.sort((a, b) => waited(a) - waited(b) || a.localeCompare(b));
-}
-
-/**
- * The states of threads whose rollout is gone, as a session archived or deleted takes its own: nothing is left to read.
- * Never a state for its age alone, since one read as missing would send a resumed thread again from the top.
- */
-export async function sweepGone(dir: string): Promise<void> {
-  let names: string[] = [];
-  try {
-    names = readdirSync(dir);
-  } catch {
-    return;
-  }
-  const gone = (name: string): boolean => {
-    const { path } = readState(dir, name);
-    return path !== undefined && !existsSync(path);
-  };
-  for (const file of names) {
-    if (!file.endsWith('.json')) continue;
-    const name = file.slice(0, -'.json'.length);
-    try {
-      if (!gone(name)) continue;
-      // Taken without waiting, and looked at again under it: a hook at work on the thread keeps its state.
-      await withLock(dir, name, 0, async () => {
-        if (gone(name)) rmSync(join(dir, file), { force: true });
-      });
-    } catch {
-      // A state that cannot be read is left as it is, as every hook leaves one.
-    }
-  }
 }
 
 /** A thread's state: afresh only where none was saved, since one read as new would send the thread again from the top. */

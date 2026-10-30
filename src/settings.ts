@@ -4,6 +4,7 @@
  * the endpoint named beside it.
  */
 
+import { createHash } from 'node:crypto';
 import { closeSync, constants, fstatSync, openSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
@@ -68,6 +69,14 @@ function fromFile(path: string): { apiKey?: string | undefined; endpoint?: strin
   } finally {
     closeSync(fd);
   }
+}
+
+/**
+ * Where a key sends, as a digest of the endpoint and the key: what a session's left turns are held to, so another
+ * session's hook sends them nowhere they were not meant to go.
+ */
+export function destinationOf(settings: Pick<Settings, 'apiKey' | 'endpoint'>): string {
+  return createHash('sha256').update(`${settings.endpoint ?? ''}\n${settings.apiKey ?? ''}`).digest('hex').slice(0, 16);
 }
 
 export function settingsFrom(env: NodeJS.ProcessEnv): Settings {
