@@ -75,9 +75,10 @@ export function subagentsOf(dir: string, sessionId: string): string[] {
     .sort();
 }
 
-/** What a session's end left: how long its rollout was then, and where its key sends (`destinationOf`). */
+/** What a session's end left: its rollout's length and last write then, and where its key sends (`destinationOf`). */
 export interface Left {
   size: number;
+  mtime: number;
   destination: string;
 }
 
@@ -95,8 +96,8 @@ export function markLeft(dir: string, sessionId: string, left: Left | undefined)
 export function readLeft(dir: string, sessionId: string): Left | undefined {
   try {
     const value = JSON.parse(readFileSync(join(dir, `${sessionId}.left`), 'utf8')) as Partial<Left> | null;
-    return value !== null && Number.isSafeInteger(value.size) && typeof value.destination === 'string'
-      ? { size: value.size as number, destination: value.destination }
+    return value !== null && Number.isSafeInteger(value.size) && Number.isFinite(value.mtime) && typeof value.destination === 'string'
+      ? { size: value.size as number, mtime: value.mtime as number, destination: value.destination }
       : undefined;
   } catch {
     return undefined;

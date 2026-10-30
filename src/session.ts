@@ -14,7 +14,7 @@ import { type Context, type Ending, hasWork, recordOf } from './record.js';
 import { type Meta, Reader, readMeta, readsAsBefore } from './rollout.js';
 import type { Destination } from './send.js';
 import { type Settings, destinationOf } from './settings.js';
-import { type ThreadState, leftSessions, markLeft, readLeft, readState, stateName, subagentsOf, withLock, writeState } from './state.js';
+import { type Left, type ThreadState, leftSessions, markLeft, readLeft, readState, stateName, subagentsOf, withLock, writeState } from './state.js';
 import { type Checkpoint, type Turn, Turns } from './turns.js';
 
 export interface Deps {
@@ -88,23 +88,57 @@ export async function sync(input: HookInput, settings: Settings, deps: Deps): Pr
   try {
     const waitMs = lockWaitOf(input, deps);
     let reached: boolean;
-    if (input.event === 'SessionEnd') {
-      reached = await endSession(input, input.rolloutPath, settings, deps, send, waitMs);
-      markLeft(settings.dir, input.sessionId, reached ? undefined : { size: sizeOf(input.rolloutPath), destination: destinationOf(settings) });
-    } else {
-      reached = await readThread(input, input.rolloutPath, settings, deps, send, waitMs);
-      // A session resumed is no longer ended: its own hooks send what its end left.
-      if (reached) markLeft(settings.dir, input.sessionId, undefined);
-    }
+    if (input.event === 'SessionEnd') reached = await endSession(input, input.rolloutPath, settings, deps, send, waitMs);
+    else reached = await readThread(input, input.rolloutPath, settings, deps, send, waitMs);
     if (reached) await sendLeft(input.sessionId, settings, deps, send);
   } finally {
     await sender.close();
   }
 }
 
-/** A session's own thread and then its subagents', each ended with it; false where a turn was not taken. */
+/**
+ * A session's own thread and then its subagents', each ended with it, and its marker set or cleared under the session's
+ * lock, so no hook clears it between; false where a turn was not taken.
+ */
 async function endSession(input: HookInput, path: string, settings: Settings, deps: Deps, send: Send, waitMs: number): Promise<boolean> {
-  if (!(await readThread(input, path, settings, deps, send, waitMs))) return false;
+  let reached = false;
+  const locked = await withLock(settings.dir, input.sessionId, waitMs, async () => {
+    reached = await endLocked(input, path, settings, deps, send, waitMs);
+    markLeft(settings.dir, input.sessionId, reached ? undefined : { ...rolloutOf(path), destination: destinationOf(settings) });
+  });
+  return locked && reached;
+}
+
+/**
+ * Another session's end again, under its lock and as its marker says there: only where its key sent and its rollout is
+ * as that end left it, else it was resumed since.
+ */
+async function endLeft(sessionId: string, settings: Settings, deps: Deps, send: Send): Promise<boolean> {
+  let reached = false;
+  const locked = await withLock(settings.dir, sessionId, 0, async () => {
+    reached = true;
+    const left = readLeft(settings.dir, sessionId);
+    if (left === undefined || left.destination !== destinationOf(settings)) return;
+    let path: string | undefined;
+    try {
+      ({ path } = readState(settings.dir, sessionId));
+    } catch (error) {
+      deps.log(`session ${sessionId.slice(0, 8)}: state not read: ${kindOf(error)}`);
+      return;
+    }
+    if (path === undefined || !sameRollout(left, rolloutOf(path))) {
+      markLeft(settings.dir, sessionId, undefined);
+      return;
+    }
+    const ended: HookInput = { event: 'SessionEnd', sessionId, threadId: sessionId, rolloutPath: path };
+    reached = await endLocked(ended, path, settings, deps, send, 0);
+    if (reached) markLeft(settings.dir, sessionId, undefined);
+  });
+  return locked && reached;
+}
+
+async function endLocked(input: HookInput, path: string, settings: Settings, deps: Deps, send: Send, waitMs: number): Promise<boolean> {
+  if (!(await readLocked(input, path, input.sessionId, settings, deps, send))) return false;
   // A subagent's thread has no end of its own: the session's is its end.
   for (const threadId of subagentsOf(settings.dir, input.sessionId)) {
     let subagentPath: string | undefined;
@@ -122,13 +156,18 @@ async function endSession(input: HookInput, path: string, settings: Settings, de
   return true;
 }
 
-/** A rollout's length now, or none where it is gone. */
-function sizeOf(path: string): number {
+/** A rollout's length and last write now, both nothing where it is gone. */
+function rolloutOf(path: string): { size: number; mtime: number } {
   try {
-    return statSync(path).size;
+    const { size, mtimeMs } = statSync(path);
+    return { size, mtime: mtimeMs };
   } catch {
-    return 0;
+    return { size: 0, mtime: 0 };
   }
+}
+
+function sameRollout(left: Left, now: { size: number; mtime: number }): boolean {
+  return left.size === now.size && left.mtime === now.mtime;
 }
 
 /**
@@ -139,25 +178,9 @@ function sizeOf(path: string): number {
 async function sendLeft(own: string, settings: Settings, deps: Deps, send: Send): Promise<void> {
   const destination = destinationOf(settings);
   for (const sessionId of leftSessions(settings.dir)) {
-    if (sessionId === own) continue;
-    const left = readLeft(settings.dir, sessionId);
-    if (left === undefined || left.destination !== destination) continue;
-    let path: string | undefined;
-    try {
-      ({ path } = readState(settings.dir, sessionId));
-    } catch (error) {
-      deps.log(`session ${sessionId.slice(0, 8)}: state not read: ${kindOf(error)}`);
-      continue;
-    }
-    if (path === undefined || sizeOf(path) !== left.size) {
-      markLeft(settings.dir, sessionId, undefined);
-      continue;
-    }
-    const ended: HookInput = { event: 'SessionEnd', sessionId, threadId: sessionId, rolloutPath: path };
-    const reached = await endSession(ended, path, settings, deps, send, 0);
-    if (reached) markLeft(settings.dir, sessionId, undefined);
+    if (sessionId === own || readLeft(settings.dir, sessionId)?.destination !== destination) continue;
     // The platform away again, or another hook at work on that session: the next hook tries again.
-    if (!reached) return;
+    if (!(await endLeft(sessionId, settings, deps, send))) return;
   }
 }
 

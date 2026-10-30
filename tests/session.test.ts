@@ -262,6 +262,35 @@ describe('a hook', () => {
     expect(existsSync(join(settings.dir, `${SESSION}.left`))).toBe(false);
   });
 
+  it('keeps what a session’s end left when a hook of its last turn finishes after it', async () => {
+    answers = [true, true, true, false];
+    const path = writtenThrough(opening(paginated, E) + 3);
+    await hook('SessionEnd', path);
+    expect(sent.map((run) => run.runId)).toEqual(runIds(A, B, C));
+    await hook('Stop', path, C);
+    expect(existsSync(join(settings.dir, `${SESSION}.left`))).toBe(true);
+    const other = readMeta(fixture('legacy'))!.sessionId;
+    const otherPath = join(dir.path, 'other.jsonl');
+    writeFileSync(otherPath, readFileSync(fixture('legacy'), 'utf8'));
+    await hook('Stop', otherPath, undefined, {}, { sessionId: other, threadId: other });
+    expect(sent.filter((record) => record.sessionId === SESSION).map((run) => run.runId)).toEqual(runIds(A, B, C, E));
+  });
+
+  it('never ends again a session whose rollout was written since, though to the same length', async () => {
+    answers = [false];
+    const path = writtenThrough(paginated.length);
+    await hook('SessionEnd', path);
+    writeFileSync(path, readFileSync(path));
+    const later = new Date(statSync(path).mtimeMs + 10_000);
+    utimesSync(path, later, later);
+    const other = readMeta(fixture('legacy'))!.sessionId;
+    const otherPath = join(dir.path, 'other.jsonl');
+    writeFileSync(otherPath, readFileSync(fixture('legacy'), 'utf8'));
+    await hook('Stop', otherPath, undefined, {}, { sessionId: other, threadId: other });
+    expect(sent.filter((record) => record.sessionId === SESSION)).toEqual([]);
+    expect(existsSync(join(settings.dir, `${SESSION}.left`))).toBe(false);
+  });
+
   it('sends what a session’s end left only where that session’s key sent', async () => {
     answers = [false];
     await hook('SessionEnd', writtenThrough(paginated.length));
