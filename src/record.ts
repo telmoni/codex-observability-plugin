@@ -91,9 +91,10 @@ const MODEL_FILE = /[/\\]([^/\\]+\.(?:gguf|ggml|bin|safetensors|llamafile))$/i;
 
 /** A model's name as Codex gives it, cut to ingest's cap: a model file's own name for its path, `unknown` for any other path. */
 function modelOf(name: string): string {
-  const file = MODEL_FILE.exec(name.trim())?.[1];
+  const trimmed = name.trim();
+  const file = MODEL_FILE.exec(trimmed)?.[1];
   if (file !== undefined) return cut(file, MODEL_MAX);
-  return PATH.test(name.trim()) ? 'unknown' : cut(name, MODEL_MAX);
+  return PATH.test(trimmed) ? 'unknown' : cut(trimmed, MODEL_MAX);
 }
 
 /** The most calls a run holds, its earliest: the SDK queues a record whole, and a turn past its queue would be cut short on every hook, never taken. */

@@ -468,6 +468,7 @@ describe('a local model’s name', () => {
     expect(sent('models/x.gguf')).toBe('x.gguf');
     expect(sent('C:\\Users\\someone\\models\\x.safetensors')).toBe('x.safetensors');
     expect(sent(' /home/someone/models/x.gguf ')).toBe('x.gguf');
+    expect(sent('  gpt-oss:20b ')).toBe('gpt-oss:20b');
     for (const path of ['/home/someone/models/gpt-oss', ' /home/someone', '~/models/x', './x', 'D:/models/x', 'file:///home/someone/m']) expect(sent(path)).toBe('unknown');
   });
 });

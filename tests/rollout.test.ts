@@ -151,6 +151,21 @@ describe('a rollout', () => {
     ]);
   });
 
+  it('keeps a tool’s name only where it is a plain name, the model writing it', () => {
+    const path = join(dir.path, 'rollout.jsonl');
+    const at = '2026-10-12T09:00:00.000Z';
+    const call = (name: string, callId: string, namespace?: string): Record<string, unknown> => ({
+      timestamp: at,
+      type: 'response_item',
+      payload: { type: 'function_call', name, arguments: '{}', call_id: callId, ...(namespace === undefined ? {} : { namespace }) },
+    });
+    const lines = [call('read the file at /etc/hosts', 'c1'), call('shell', 'c2'), call('create_issue', 'c3', 'mcp__github'), call('x', 'c4', 'my server/../')];
+    writeFileSync(path, lines.map((line) => `${JSON.stringify(line)}\n`).join(''));
+    const names = readAll(path).map((line) => (line.event.kind === 'call' ? line.event.name : line.event.kind));
+    expect(names).toEqual(['unknown', 'shell', 'mcp__github__create_issue', 'unknown']);
+    expect(JSON.stringify(readAll(path))).not.toContain('/etc/hosts');
+  });
+
   it('names a turn’s error by its kind, never its message', () => {
     const path = join(dir.path, 'rollout.jsonl');
     const closing = (error: unknown): string =>

@@ -205,19 +205,26 @@ function countOf(value: unknown): Event {
   return { kind: 'count', key, usage: reads ? usage : undefined };
 }
 
+/** A tool's name: a plain name, as every provider's tools have, cut to ingest's cap where it is sent; the model writes it, so anything else is text, kept as `unknown`. */
+const TOOL_NAME = /^[\w.:@+-]+$/;
+
+function plainTool(name: string | undefined): string | undefined {
+  return name === undefined ? undefined : TOOL_NAME.test(name) ? name : 'unknown';
+}
+
 /** A namespaced tool by the name the model calls it: an MCP tool's `mcp__<server>__<tool>`. */
 function toolNameOf(name: unknown, namespace: unknown): string | undefined {
   const tool = nameOf(name);
   const space = nameOf(namespace);
-  if (tool === undefined || space === undefined) return tool;
-  return space.endsWith('__') ? `${space}${tool}` : `${space}__${tool}`;
+  if (tool === undefined || space === undefined) return plainTool(tool);
+  return plainTool(space.endsWith('__') ? `${space}${tool}` : `${space}__${tool}`);
 }
 
 /** An MCP tool by its server's name and its own, which the model's name for it may have shortened. */
 function mcpNameOf(server: unknown, tool: unknown): string | undefined {
   const serverName = nameOf(server);
   const toolName = nameOf(tool);
-  return serverName === undefined || toolName === undefined ? undefined : `mcp__${serverName}__${toolName}`;
+  return serverName === undefined || toolName === undefined ? undefined : plainTool(`mcp__${serverName}__${toolName}`);
 }
 
 function callOf(callId: string | undefined, name: string | undefined, inPlace: boolean, status: unknown): Event {
