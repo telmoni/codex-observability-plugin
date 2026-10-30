@@ -79,17 +79,43 @@ describe('the package', () => {
     ) as Packed[] | Record<string, Packed>;
     // npm before 12 answers a list, npm 12 an object by the package's name.
     const packed = Array.isArray(output) ? output[0]! : Object.values(output)[0]!;
-    expect(packed.files.map((file) => file.path).sort()).toEqual(
+    const files = packed.files.map((file) => file.path);
+    const chunks = files.filter((path) => path.startsWith('dist/') && path !== 'dist/hook.mjs');
+    expect(files.filter((path) => !chunks.includes(path)).sort()).toEqual(
       ['.codex-plugin/plugin.json', 'LICENSE', 'dist/hook.mjs', 'hooks/hooks.json', 'package.json'].sort(),
     );
+    // The hook's own chunks, and nothing else under dist.
+    expect(chunks.every((path) => /^dist\/[\w.-]+\.mjs$/.test(path))).toBe(true);
+    expect(chunks.sort()).toEqual(readdirSync(join(ROOT, 'dist')).filter((name) => name !== 'hook.mjs').map((name) => `dist/${name}`).sort());
     // npm takes seconds to start.
   }, 30_000);
 
-  it('bundles the hook into one file that needs nothing but Node', () => {
-    expect(readdirSync(join(ROOT, 'dist'))).toEqual(['hook.mjs']);
-    const bundle = readFileSync(join(ROOT, 'dist', 'hook.mjs'), 'utf8');
-    const imported = [...bundle.matchAll(/(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*)["']([^"']+)["']/g)].map((match) => match[1]);
+  it('bundles the hook into its own files, needing nothing but Node', () => {
+    const files = readdirSync(join(ROOT, 'dist'));
+    expect(files).toContain('hook.mjs');
     const builtins = new Set(builtinModules.flatMap((name) => [name, `node:${name}`]));
-    expect(imported.filter((name) => !builtins.has(name!))).toEqual([]);
+    for (const file of files) {
+      const bundle = readFileSync(join(ROOT, 'dist', file), 'utf8');
+      const imported = [...bundle.matchAll(/(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*)["']([^"']+)["']/g)].map((match) => match[1]!);
+      // A builtin, or another of the bundle's own chunks.
+      expect(imported.filter((name) => !builtins.has(name) && !(name.startsWith('./') && files.includes(name.slice(2)))), file).toEqual([]);
+    }
+  });
+
+  it('loads none of the SDK in the hook Codex waits on, only in the copy it hands off to', () => {
+    const loaded = new Set<string>();
+    const load = (file: string): void => {
+      if (loaded.has(file)) return;
+      loaded.add(file);
+      const text = readFileSync(join(ROOT, 'dist', file), 'utf8');
+      // Static imports alone: `import(...)`, as the copy loads the sender, is not followed.
+      for (const [, imported] of text.matchAll(/(?:\bfrom\s*|^import\s*)"\.\/([^"]+)"/gm)) load(imported!);
+    };
+    load('hook.mjs');
+    for (const file of loaded) {
+      const text = readFileSync(join(ROOT, 'dist', file), 'utf8');
+      expect(text, file).not.toMatch(/opentelemetry|recordRun/);
+    }
+    expect(readdirSync(join(ROOT, 'dist')).some((file) => /recordRun/.test(readFileSync(join(ROOT, 'dist', file), 'utf8')))).toBe(true);
   });
 });

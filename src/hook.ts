@@ -8,8 +8,6 @@ import { fileURLToPath } from 'node:url';
 
 import { handedOff, inputFrom } from './input.js';
 import { kindOf, log } from './log.js';
-import { Sender } from './send.js';
-import { sync } from './session.js';
 import { settingsFrom } from './settings.js';
 
 /** How the detached copy is handed its input: in its environment, never on its command line, which anyone on the machine may list. */
@@ -73,6 +71,8 @@ try {
   } else {
     const input = handedOff(JSON.parse(handed));
     if (input !== undefined) {
+      // Only the detached copy loads the SDK: Codex waits on the hook, and OpenTelemetry costs it some 50 ms.
+      const [{ sync }, { Sender }] = await Promise.all([import('./session.js'), import('./send.js')]);
       const tag = `${input.event} ${input.threadId.slice(0, 8)}:`;
       const write = (line: string): void => log(settings.dir, `${tag} ${line}`);
       try {
