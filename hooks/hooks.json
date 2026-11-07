@@ -1,0 +1,29 @@
+{
+  "description": "Telmoni Observability: each turn of a Codex session recorded in Telmoni as a run.",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/dist/hook.mjs\" || true",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\dist\\hook.mjs\" || exit /b 0",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/dist/hook.mjs\" || true",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\dist\\hook.mjs\" || exit /b 0",
+            "timeout": 3
+          }
+        ]
+      }
+    ]
+  }
+}
