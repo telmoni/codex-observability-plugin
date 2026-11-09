@@ -19,7 +19,7 @@ The Codex plugin for Telmoni: a hook that records each turn of a person's Codex 
 | `src/cli/hook.ts` | The command Codex runs, its payload on stdin: it starts the worker and returns, loading no SDK and printing nothing. |
 | `src/cli/worker.ts` | The worker's entry point, its stop on stdin and the SDK in its bundle. |
 | `src/*.ts` | `payload` (the hook's input), `paths` (Codex's folder, the key file, the plugin's data folder), `transcript` (the rollout's lines and what is read of them), `turns` (how turns are cut, and when they are complete), `record` (a turn as a run), `names` (what a record may call a model, a provider or a tool), `worker`. |
-| `src/shared/` | Copies of the SDK's coding-agent module (`settings`, `log`, `state`, `send`, `tags`), shared with the other Telmoni plugins and changed only in their imports. |
+| `src/shared/` | Copies of the SDK's coding-agent module (`settings`, `log`, `state`, `send`, `tags`), the Antigravity plugin's too, changed from the SDK's only in their imports and Prettier's line width. |
 | `dist/`, `tsup.config.ts` | The committed bundles, `hook.mjs` and `worker.mjs`: tsup builds them from `src/`, the SDK bundled into the worker, for Node 22 or later. Codex builds and installs nothing. |
 | `skills/telmoni-observability/SKILL.md` | The skill: connecting the key, trusting the hooks, tags, the switches and the log. It runs nothing. |
 | `assets/logo.png` | The logo the manifest names. |
