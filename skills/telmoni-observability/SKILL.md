@@ -56,7 +56,7 @@ The user edits the key file themselves. Content is kept only in a project whose 
 
 ## Tag this repository
 
-Tags label every run started in a folder. To tag the repository, write `.telmoni-tags.json` at its root: a JSON object of strings, such as `{"repo": "telmoni", "branch": "main"}`. A file in a subfolder tags the sessions started there instead; the nearest file wins.
+Tags label every trace of a session started in a folder. To tag the repository, write `.telmoni-tags.json` at its root: a JSON object of strings, such as `{"repo": "telmoni", "branch": "main"}`. A file in a subfolder tags the sessions started there instead; the nearest file wins.
 
 - **`repo`:** the repository's name alone, the last part of `git remote get-url origin` without `.git`, else the folder's name. Never the URL, which can hold a token.
 - **`branch`:** from `git branch --show-current`. The file does not follow a branch switch, so tell the user to update it, or leave `branch` out.

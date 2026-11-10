@@ -42,7 +42,7 @@ Left blank, the endpoint is `https://api.telmoni.com`. The key file is read as e
 
 ### Ask the agent
 
-The plugin brings a skill, `telmoni-observability`, so you can ask Codex in plain words to help connect Telmoni, to tag this repository's runs with its repo and branch, or to work out why your sessions aren't showing up. The skill never asks for your key or reads the key file: it tells you what to run in your own terminal.
+The plugin brings a skill, `telmoni-observability`, so you can ask Codex in plain words to help connect Telmoni, to tag this repository's traces with its repo and branch, or to work out why your sessions aren't showing up. The skill never asks for your key or reads the key file: it tells you what to run in your own terminal.
 
 ### A turn's conversation
 
@@ -68,7 +68,7 @@ No pattern finds a name or a street address.
 A turn, from your prompt to Codex's last reply, is one trace of the agent `codex`, released as the Codex version that ran it. Your session is the trace's session, so the console groups a session's traces together. Inside the trace:
 
 - **Model calls.** One per model response, from what it was handed (your prompt, or the tools' output) to its end. Each names the turn's model and its reasoning effort, and has its input, output, cache-read and cache-write tokens as Codex counts them. The provider is the one Codex names (`openai`, `ollama`), its `azure` as Azure OpenAI.
-- **Tool calls.** What Codex ran, by kind: `shell` for a command, `apply_patch` for an edit, `web_search`, `view_image`, `image_generation`, an MCP server's tool as `mcp__<server>__<tool>`, a dynamic or subagent tool by its name (`spawn_agent`, `wait`), and Codex's own extensions by their kind (`clock.sleep`), each with the times Codex wrote. A command that exited non-zero, or a call Codex marked failed, is failed; an edit you refused is cancelled. A command you run yourself (`!cmd`) is not the agent's, and not recorded. Where the model runs its tools through Codex's `exec` tool, as it writes code to, that code is content: the run holds what the code did.
+- **Tool calls.** What Codex ran, by kind: `shell` for a command, `apply_patch` for an edit, `web_search`, `view_image`, `image_generation`, an MCP server's tool as `mcp__<server>__<tool>`, a dynamic or subagent tool by its name (`spawn_agent`, `wait`), and Codex's own extensions by their kind (`clock.sleep`), each with the times Codex wrote. A command that exited non-zero, or a call Codex marked failed, is failed; an edit you refused is cancelled. A command you run yourself (`!cmd`) is not the agent's, and not recorded. Where the model runs its tools through Codex's `exec` tool, as it writes code to, that code is content: the trace holds what the code did.
 - **Errors.** The error that ended a turn is its last model call, failed, named by Codex's kind for it (`usage_limit_exceeded`, `response_too_many_failed_attempts`), never its message: Codex writes no record of a request that failed.
 - **Compactions.** Each is a step named `compaction`, holding the model call that wrote its summary.
 

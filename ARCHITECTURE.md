@@ -14,7 +14,7 @@ The plugin records one trace per turn, from the person's prompt to Codex's close
 
 each with its times and whether it failed or was cancelled.
 
-The plugin reads Codex's own rollout after the fact. It adds no tool and no rule, and it never fails or slows a turn. Its one skill, whose full text Codex loads only when a prompt calls for it, tells the agent how to connect, tag and troubleshoot the plugin. What becomes of a run past ingest is Telmoni's.
+The plugin reads Codex's own rollout after the fact. It adds no tool and no rule, and it never fails or slows a turn. Its one skill, whose full text Codex loads only when a prompt calls for it, tells the agent how to connect, tag and troubleshoot the plugin. What becomes of a trace past ingest is Telmoni's.
 
 ## How Codex loads it
 
@@ -119,7 +119,7 @@ A turn is complete, and sent, when nothing can still change it:
 - a later turn began; or
 - the session ended: a `SessionEnd` hook's worker sends every turn still open, as cancelled.
 
-A `Stop`'s worker waits for the stopped turn's close, which Codex writes only once its `Stop` hooks have returned. A turn that fires no `Stop`, one an error ended or one interrupted, is sent at the next hook, a later turn's `Stop` or the session's end. A turn not complete holds every turn after it, and the log says `held <run id>` at each hook that holds it, where the turn had begun before that hook ran: one begun after it is at work, as it should be.
+A `Stop`'s worker waits for the stopped turn's close, which Codex writes only once its `Stop` hooks have returned. A turn that fires no `Stop`, one an error ended or one interrupted, is sent at the next hook, a later turn's `Stop` or the session's end. A turn not complete holds every turn after it, and the log says `held <trace id>` at each hook that holds it, where the turn had begun before that hook ran: one begun after it is at work, as it should be.
 
 A turn with no call in it is not recorded.
 
@@ -179,7 +179,7 @@ The plugin's folder is `PLUGIN_DATA`, the data folder Codex gives the plugin's h
 - `<session>.lock`, the worker's while it works on the session (`shared/state.ts`'s `withLock`). It holds a token of the worker's own, and is freshened every 10 s; one not freshened for a minute was left by a worker that died. A stop's worker waits a minute for the lock, then logs that another hook holds the session and leaves its turns to the next.
 - `hook.log`, a line `<UTC time> <session> <text>` for each trace sent, taken in part, refused or kept, each turn held, each once-a-session warning, each tag dropped and each fault. The worker's stderr goes there too. Past a mebibyte it is moved aside to `hook.log.1`.
 
-Nothing of the session is logged: a session is named by the first 8 characters of its id, and a run by the first 8 of its.
+Nothing of the session is logged: a session is named by the first 8 characters of its id, and a trace by the first 8 of its.
 
 ## Delivery and failure
 
@@ -197,7 +197,7 @@ A session that ends while it still holds traces has no next stop of its own. So 
 - only where its `destination` is the same, so traces go nowhere their own key did not send them;
 - stopping at the first Telmoni still cannot take.
 
-Past 200 kept runs the oldest go, and the log says how many. A key or endpoint changed under a session drops what it kept for the old one, logged.
+Past 200 kept traces the oldest go, and the log says how many. A key or endpoint changed under a session drops what it kept for the old one, logged. A kept record in a shape the plugin does not send is dropped as the state is read, and the log says how many.
 
 ## Shared code
 
@@ -293,7 +293,7 @@ Every other push ends green with nothing done, as does every push while the vers
 ## Known gaps
 
 - No hook of the plugin's has run in a live Codex session: the payloads, the trust and the shell are from Codex's source and docs. Windows is untried.
-- A moved rollout format is not detected. It shows as runs with less in them, or turns held, until the reader catches up. The reader is written for Codex 0.167's.
+- A moved rollout format is not detected. It shows as traces with less in them, or turns held, until the reader catches up. The reader is written for Codex 0.167's.
 - A model call's start is where the rollout says it was handed its input, not when Codex sent the request.
 - A tool Codex writes no `item_completed` for (`update_plan`, `request_user_input`, `write_stdin`, a tool interrupted, an `exec_command` refused) is not recorded as a call: what the model asked of it is in its response's content alone.
 - A subagent works in a thread and a rollout of its own, which fires `SubagentStop`, not `Stop`, so its model calls and tools are not recorded: its parent's trace holds the tool calls that started and waited on it. A multi-agent v2 subagent's activity (`SubAgentActivity`) is not read.

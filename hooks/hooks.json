@@ -1,5 +1,5 @@
 {
-  "description": "Telmoni Observability: each turn of a Codex session recorded in Telmoni as a run.",
+  "description": "Telmoni Observability: each turn of a Codex session recorded in Telmoni as a trace.",
   "hooks": {
     "Stop": [
       {
