@@ -1,6 +1,6 @@
 # Telmoni for Codex
 
-Records each turn of your [Codex](https://developers.openai.com/codex) sessions in [Telmoni](https://telmoni.com) as a run: the models it called and their tokens, the commands, edits and other tools it ran, and the compactions it made, each with its times and whether it failed. Nothing you or the agent said, except the tags you set, unless you turn on **content** and the project keeps content: then each turn's conversation too.
+Records each turn of your [Codex](https://developers.openai.com/codex) sessions in [Telmoni](https://telmoni.com) as a trace: the models it called and their tokens, the commands, edits and other tools it ran, and the compactions it made, each with its times and whether it failed. Nothing you or the agent said, except the tags you set, unless you turn on **content** and the project keeps content: then each turn's conversation too.
 
 [Telmoni](https://github.com/telmoni/telmoni) is privacy-first, open-source monitoring for AI agents: with your sessions recorded, its [alerts](https://telmoni.com/docs/monitoring/alerts) tell you when a turn fails, loops on one tool or costs more than you set, and show you the turn that did it. Prompts stay in your process unless you turn content on.
 
@@ -65,18 +65,18 @@ No pattern finds a name or a street address.
 
 ## What a turn records
 
-A turn, from your prompt to Codex's last reply, is one run of the agent `codex`, released as the Codex version that ran it. Your session is the run's session, so the console groups a session's runs together. Inside the run:
+A turn, from your prompt to Codex's last reply, is one trace of the agent `codex`, released as the Codex version that ran it. Your session is the trace's session, so the console groups a session's traces together. Inside the trace:
 
 - **Model calls.** One per model response, from what it was handed (your prompt, or the tools' output) to its end. Each names the turn's model and its reasoning effort, and has its input, output, cache-read and cache-write tokens as Codex counts them. The provider is the one Codex names (`openai`, `ollama`), its `azure` as Azure OpenAI.
 - **Tool calls.** What Codex ran, by kind: `shell` for a command, `apply_patch` for an edit, `web_search`, `view_image`, `image_generation`, an MCP server's tool as `mcp__<server>__<tool>`, a dynamic or subagent tool by its name (`spawn_agent`, `wait`), and Codex's own extensions by their kind (`clock.sleep`), each with the times Codex wrote. A command that exited non-zero, or a call Codex marked failed, is failed; an edit you refused is cancelled. A command you run yourself (`!cmd`) is not the agent's, and not recorded. Where the model runs its tools through Codex's `exec` tool, as it writes code to, that code is content: the run holds what the code did.
 - **Errors.** The error that ended a turn is its last model call, failed, named by Codex's kind for it (`usage_limit_exceeded`, `response_too_many_failed_attempts`), never its message: Codex writes no record of a request that failed.
 - **Compactions.** Each is a step named `compaction`, holding the model call that wrote its summary.
 
-A turn you interrupt is a cancelled run, as is one still open when the session ends. A turn an error ended is a failed one, and one that ran out of Codex's budget fails as `budget_limited`.
+A turn you interrupt is a cancelled trace, as is one still open when the session ends. A turn an error ended is a failed one, and one that ran out of Codex's budget fails as `budget_limited`.
 
 A turn is sent once Codex has closed it, which Codex does just after the turn's `Stop` hook returns: the hook's worker waits for it, 30 s at most. A turn that an error ended or that you interrupted fires no `Stop`, so it is sent at the next turn's end, or when the session ends. The first turn the plugin hears end in a session is the first it records: turns from before the plugin was installed, or before a key was set, stay on your machine. A session Codex keeps no rollout of (`codex exec --ephemeral`) is not recorded.
 
-A subagent Codex starts works in a thread of its own, whose model calls are not in the run: the run holds the tool calls that started it and waited on it.
+A subagent Codex starts works in a thread of its own, whose model calls are not in the trace: the trace holds the tool calls that started it and waited on it.
 
 With content off, the plugin reads only:
 

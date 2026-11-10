@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
-import { runIdOf } from '../src/record.js';
+import { traceIdOf } from '../src/record.js';
 import {
   KEY,
   Rollout,
@@ -123,9 +123,9 @@ describe.skipIf(process.platform === 'win32')('the hook, as Codex runs it', () =
     expect(result.stdout).toBe('');
     // Before the worker's own settle wait is up: the hook never waits on it.
     expect(result.ms).toBeLessThan(2_000);
-    expect(await until(() => bodies.some((body) => body.includes(runIdOf(SESSION, turnId))))).toBe(
-      true,
-    );
+    expect(
+      await until(() => bodies.some((body) => body.includes(traceIdOf(SESSION, turnId)))),
+    ).toBe(true);
     const state = join(pluginDir(home), `${SESSION}.json`);
     expect(
       await until(

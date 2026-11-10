@@ -3,7 +3,7 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { runIdOf } from '../src/record.js';
+import { traceIdOf } from '../src/record.js';
 import {
   FakeTelmoni,
   KEY,
@@ -24,31 +24,31 @@ import {
   writeKeyFile,
 } from './helpers.js';
 
-const names = (telmoni: FakeTelmoni, runId: string): string[] =>
-  (telmoni.runs().get(runId) ?? []).map((span) => span.name);
+const names = (telmoni: FakeTelmoni, traceId: string): string[] =>
+  (telmoni.traces().get(traceId) ?? []).map((span) => span.name);
 
-/** A run's spans of one operation: `invoke_agent` the run, `chat` a model call, `execute_tool` a tool call. */
-const kindOf = (telmoni: FakeTelmoni, runId: string, operation: string) =>
-  (telmoni.runs().get(runId) ?? []).filter(
+/** A trace's spans of one operation: `invoke_agent` the agent's own, `chat` a model call, `execute_tool` a tool call. */
+const kindOf = (telmoni: FakeTelmoni, traceId: string, operation: string) =>
+  (telmoni.traces().get(traceId) ?? []).filter(
     (span) => attributes(span)['gen_ai.operation.name'] === operation,
   );
 
 describe('a turn sent', () => {
-  it('goes as a run of codex: its model calls with their tokens, its commands, its times, and nothing said', async () => {
+  it('goes as a trace of codex: its model calls with their tokens, its commands, its times, and nothing said', async () => {
     const home = makeHome();
     const telmoni = new FakeTelmoni();
     const rollout = new Rollout(home);
     const turnId = rollout.turn(2);
     await runWorker(rollout.stop(), home, telmoni);
 
-    const runId = runIdOf(SESSION, turnId);
-    const spans = telmoni.runs().get(runId) ?? [];
+    const traceId = traceIdOf(SESSION, turnId);
+    const spans = telmoni.traces().get(traceId) ?? [];
     expect(spans.length).toBeGreaterThan(0);
-    const root = kindOf(telmoni, runId, 'invoke_agent')[0];
+    const root = kindOf(telmoni, traceId, 'invoke_agent')[0];
     expect(root?.name).toBe('invoke_agent codex');
     expect(attributes(root!)['gen_ai.conversation.id']).toBe(SESSION);
 
-    const models = kindOf(telmoni, runId, 'chat');
+    const models = kindOf(telmoni, traceId, 'chat');
     expect(models).toHaveLength(2);
     const first = attributes(models[0]!);
     expect(first['gen_ai.request.model']).toBe('gpt-6-sol');
@@ -57,12 +57,12 @@ describe('a turn sent', () => {
     expect(first['gen_ai.usage.output_tokens']).toBe(120);
     expect(first['gen_ai.usage.cache_read.input_tokens']).toBe(12000);
 
-    const tools = kindOf(telmoni, runId, 'execute_tool');
+    const tools = kindOf(telmoni, traceId, 'execute_tool');
     expect(tools.map((span) => attributes(span)['gen_ai.tool.name'])).toEqual(['shell', 'shell']);
     expect(endMs(tools[0]!) - startMs(tools[0]!)).toBe(1500);
     expect(startMs(root!)).toBe(T0 + 1000);
 
-    expect(stateOf(home).sent).toEqual([runId]);
+    expect(stateOf(home).sent).toEqual([traceId]);
     assertMetadataOnly(telmoni.text() + keptText(home) + logOf(home), [rollout.path, rollout.cwd]);
   });
 
@@ -86,8 +86,8 @@ describe('where a session starts', () => {
     const before = rollout.turn(1);
     const after = rollout.turn(1);
     await runWorker(rollout.stop(), home, telmoni);
-    expect(telmoni.runs().has(runIdOf(SESSION, before))).toBe(false);
-    expect(telmoni.runs().has(runIdOf(SESSION, after))).toBe(true);
+    expect(telmoni.traces().has(traceIdOf(SESSION, before))).toBe(false);
+    expect(telmoni.traces().has(traceIdOf(SESSION, after))).toBe(true);
   });
 });
 
@@ -105,7 +105,7 @@ describe('a turn not closed yet', () => {
     await new Promise((resolve) => setTimeout(resolve, 200));
     rollout.complete();
     await working;
-    expect(telmoni.runs().has(runIdOf(SESSION, turnId))).toBe(true);
+    expect(telmoni.traces().has(traceIdOf(SESSION, turnId))).toBe(true);
     expect(logOf(home)).not.toContain('not over yet');
   });
 
@@ -117,7 +117,7 @@ describe('a turn not closed yet', () => {
     const stop = rollout.stop();
     rollout.prompt();
     await runWorker(stop, home, telmoni);
-    expect(telmoni.runs().has(runIdOf(SESSION, ended))).toBe(true);
+    expect(telmoni.traces().has(traceIdOf(SESSION, ended))).toBe(true);
     expect(logOf(home)).not.toContain('not over yet');
   });
 
@@ -132,19 +132,19 @@ describe('a turn not closed yet', () => {
     expect(logOf(home)).toContain('its turn is not over yet');
     rollout.reply().complete();
     await runWorker(rollout.stop(), home, telmoni);
-    expect(telmoni.runs().has(runIdOf(SESSION, turnId))).toBe(true);
+    expect(telmoni.traces().has(traceIdOf(SESSION, turnId))).toBe(true);
   });
 });
 
 describe('outcomes', () => {
-  it('an interrupted turn is a cancelled run', async () => {
+  it('an interrupted turn is a cancelled trace', async () => {
     const home = makeHome();
     const telmoni = new FakeTelmoni();
     const rollout = new Rollout(home);
     const turnId = rollout.prompt();
     rollout.reply({ tool: true }).command().abort();
     await runWorker(rollout.stop(), home, telmoni);
-    expect(names(telmoni, runIdOf(SESSION, turnId)).length).toBeGreaterThan(0);
+    expect(names(telmoni, traceIdOf(SESSION, turnId)).length).toBeGreaterThan(0);
   });
 
   it('a session that ends with its turn open sends that turn', async () => {
@@ -156,8 +156,8 @@ describe('outcomes', () => {
     const open = rollout.prompt();
     rollout.reply({ tool: true }).command();
     await runWorker(rollout.end(), home, telmoni);
-    expect(telmoni.runs().has(runIdOf(SESSION, first))).toBe(true);
-    expect(telmoni.runs().has(runIdOf(SESSION, open))).toBe(true);
+    expect(telmoni.traces().has(traceIdOf(SESSION, first))).toBe(true);
+    expect(telmoni.traces().has(traceIdOf(SESSION, open))).toBe(true);
   });
 });
 
@@ -193,7 +193,7 @@ describe('tags', () => {
     writeFileSync(join(rollout.cwd, '.telmoni-tags.json'), JSON.stringify({ repo: 'telmoni' }));
     const turnId = rollout.turn(0);
     await runWorker(rollout.stop(), home, telmoni);
-    const root = kindOf(telmoni, runIdOf(SESSION, turnId), 'invoke_agent')[0];
+    const root = kindOf(telmoni, traceIdOf(SESSION, turnId), 'invoke_agent')[0];
     expect(attributes(root!)['telmoni.tag.repo']).toBe('telmoni');
   });
 });
@@ -247,7 +247,7 @@ describe('delivery', () => {
     await runWorker(rollout.stop(), home, telmoni);
     await runWorker(rollout.stop(), home, telmoni);
     await runWorker(rollout.end(), home, telmoni);
-    expect([...telmoni.runs().keys()]).toEqual([runIdOf(SESSION, turnId)]);
+    expect([...telmoni.traces().keys()]).toEqual([traceIdOf(SESSION, turnId)]);
   });
 
   it('keeps a turn Telmoni could not take and sends it first at the next stop, the later turn behind it', async () => {
@@ -258,7 +258,7 @@ describe('delivery', () => {
     telmoni.offline = true;
     await runWorker(rollout.stop(), home, telmoni);
     expect(stateOf(home).pending).toHaveLength(1);
-    expect(logOf(home)).toContain(`kept ${runIdOf(SESSION, first).slice(0, 8)}`);
+    expect(logOf(home)).toContain(`kept ${traceIdOf(SESSION, first).slice(0, 8)}`);
 
     const second = rollout.turn(0);
     await runWorker(rollout.stop(), home, telmoni);
@@ -267,14 +267,36 @@ describe('delivery', () => {
     telmoni.offline = false;
     const third = rollout.turn(0);
     await runWorker(rollout.stop(), home, telmoni);
-    expect([...telmoni.runs().keys()]).toEqual(
-      [first, second, third].map((turnId) => runIdOf(SESSION, turnId)),
+    expect([...telmoni.traces().keys()]).toEqual(
+      [first, second, third].map((turnId) => traceIdOf(SESSION, turnId)),
     );
     expect(stateOf(home).pending).toEqual([]);
     // Kept with the Codex version it was sent as.
     expect(telmoni.resources().every((resource) => resource['service.version'] === '0.167.0')).toBe(
       true,
     );
+  });
+
+  it('drops a turn kept in a shape no longer sent, says so, and sends the next', async () => {
+    const home = makeHome();
+    const telmoni = new FakeTelmoni();
+    const rollout = new Rollout(home);
+    rollout.turn(0);
+    telmoni.offline = true;
+    await runWorker(rollout.stop(), home, telmoni);
+    const state = stateOf(home);
+    const [kept] = state.pending as { trace: unknown; release?: string }[];
+    writeFileSync(
+      join(pluginDir(home), `${SESSION}.json`),
+      JSON.stringify({ ...state, pending: [{ run: kept!.trace, release: kept!.release }] }),
+    );
+
+    telmoni.offline = false;
+    const next = rollout.turn(0);
+    await runWorker(rollout.stop(), home, telmoni);
+    expect(logOf(home)).toContain('dropped 1 kept in a shape no longer sent');
+    expect([...telmoni.traces().keys()]).toEqual([traceIdOf(SESSION, next)]);
+    expect(stateOf(home).pending).toEqual([]);
   });
 
   it('does not keep a turn Telmoni refused for good', async () => {
@@ -304,8 +326,8 @@ describe('delivery', () => {
     const rollout = new Rollout(home);
     const own = rollout.turn(0);
     await runWorker(rollout.stop(), home, telmoni);
-    expect(new Set(telmoni.runs().keys())).toEqual(
-      new Set([runIdOf(SESSION, own), runIdOf(OTHER, leftTurn)]),
+    expect(new Set(telmoni.traces().keys())).toEqual(
+      new Set([traceIdOf(SESSION, own), traceIdOf(OTHER, leftTurn)]),
     );
     expect(stateOf(home, OTHER).pending).toEqual([]);
     expect(stateOf(home, '019a6f2e-5c00-7d2a-9b1e-4f0c3a2b1d12').pending).toHaveLength(1);
@@ -374,7 +396,7 @@ describe('the session’s state', () => {
     writeFileSync(join(pluginDir(home), `${SESSION}.json`), '{not json');
     rollout.turn(0);
     await runWorker(rollout.stop(), home, telmoni);
-    expect(telmoni.runs().size).toBe(1);
+    expect(telmoni.traces().size).toBe(1);
     expect(logOf(home)).toContain('state unreadable');
   });
 
@@ -390,7 +412,7 @@ describe('the session’s state', () => {
     utimesSync(lock, now, now);
     rollout.turn(0);
     await runWorker(rollout.stop(), home, telmoni, undefined, { lockWaitMs: 50 });
-    expect(telmoni.runs().size).toBe(1);
+    expect(telmoni.traces().size).toBe(1);
     expect(logOf(home)).toContain('another hook holds the session');
   });
 
@@ -408,6 +430,6 @@ describe('the session’s state', () => {
     );
     expect(offset).toBeGreaterThan(0);
     expect(line).toBeGreaterThan(0);
-    expect(telmoni.runs().size).toBe(2);
+    expect(telmoni.traces().size).toBe(2);
   });
 });

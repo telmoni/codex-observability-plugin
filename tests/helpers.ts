@@ -602,14 +602,12 @@ export class FakeTelmoni {
     });
   }
 
-  /** The spans of each run, by run id. */
-  runs(): Map<string, Span[]> {
-    const runs = new Map<string, Span[]>();
-    for (const span of this.spans()) {
-      const id = String(attributes(span)['telmoni.run_id']);
-      runs.set(id, [...(runs.get(id) ?? []), span]);
-    }
-    return runs;
+  /** The spans of each trace, by trace id. */
+  traces(): Map<string, Span[]> {
+    const traces = new Map<string, Span[]>();
+    for (const span of this.spans())
+      traces.set(span.traceId, [...(traces.get(span.traceId) ?? []), span]);
+    return traces;
   }
 
   /** Everything that left but the key, which goes in its `Authorization` header alone. */
@@ -625,6 +623,7 @@ export class FakeTelmoni {
 
 export interface Span {
   name: string;
+  traceId: string;
   spanId: string;
   parentSpanId?: string;
   startTimeUnixNano: string;

@@ -1,10 +1,10 @@
 # Architecture
 
-The Codex plugin for Telmoni: a `Stop` and `SessionEnd` hook that records each turn of a person's Codex sessions as a run, metadata only unless the person turns content on, through the platform's TypeScript SDK ([`telmoni/telmoni`](https://github.com/telmoni/telmoni), `sdk/typescript`). The repository is the plugin and its own marketplace: Codex installs it from its address or from a clone, and runs the hook from the copy. The bundle in `dist/` is committed, since Codex builds nothing.
+The Codex plugin for Telmoni: a `Stop` and `SessionEnd` hook that records each turn of a person's Codex sessions as a trace, metadata only unless the person turns content on, through the platform's TypeScript SDK ([`telmoni/telmoni`](https://github.com/telmoni/telmoni), `sdk/typescript`). The repository is the plugin and its own marketplace: Codex installs it from its address or from a clone, and runs the hook from the copy. The bundle in `dist/` is committed, since Codex builds nothing.
 
 ## Purpose and scope
 
-The plugin records one run per turn, from the person's prompt to Codex's close of the turn, of the agent `codex`, in the session Codex names. A run holds:
+The plugin records one trace per turn, from the person's prompt to Codex's close of the turn, of the agent `codex`, in the session Codex names. A trace holds:
 
 - its model calls, one per model response, with their tokens;
 - its tool calls: the commands, edits, MCP tools, web searches and image views Codex ran;
@@ -127,11 +127,11 @@ A turn with no call in it is not recorded.
 
 ## What it sends
 
-One run a turn, built by `record.ts` as the SDK's `RunRecord`, which is also what the state keeps, with the Codex version it is released as, and sent through `recordRun`.
+One trace a turn, built by `record.ts` as the SDK's `TraceRecord`, which is also what the state keeps, with the Codex version it is released as, and sent through `recordTrace`.
 
-- **Ids.** The run's id is a version 5 UUID of `<session>:<turn>`, under the plugin's own namespace: `uuid5(NAMESPACE_URL, "https://telmoni.com/codex-observability-plugin")`. The SDK makes the run's id its trace's, and each span's id from it and the span's place, so a turn sent twice is stored once. The worker also remembers the newest 500 ids it sent, and passes over a turn among them.
-- **The run.**
-  - It is a run of the agent `codex`, in the session, from the turn's start to its last time, released as the session's `cli_version`.
+- **Ids.** The trace's id is the version 5 UUID of `<session>:<turn>`, under the plugin's own namespace, `uuid5(NAMESPACE_URL, "https://telmoni.com/codex-observability-plugin")`, spelled as its 32 hex digits: a turn recorded while the id was written as a UUID keeps it. The SDK makes each span's id from it and the span's place, so a turn sent twice is stored once. The worker also remembers the newest 500 ids it sent, and passes over a turn among them.
+- **The trace.**
+  - It is a trace of the agent `codex`, in the session, from the turn's start to its last time, released as the session's `cli_version`.
   - It fails by the kind of the error that ended it, and as `budget_limited` where Codex aborted it for its budget.
   - It is cancelled where Codex aborted it otherwise (`interrupted`, `replaced`, `review_ended`), or where it never closed it before the session ended or another turn began.
   - It carries the tags of the session folder's `.telmoni-tags.json`.
@@ -142,7 +142,7 @@ Every call is ordered by its start.
 
 **With content on**:
 
-- the run's input is the prompt as typed, and its output the turn's last reply;
+- the trace's input is the prompt as typed, and its output the turn's last reply;
 - each model call carries what is new to it: the turn's first is handed the prompt, each later one the tools' output since the call before, as one `tool` message of `tool_call_response` parts;
 - each model call's output is its reasoning summary, its words and its tool calls with their input;
 - each tool call carries its input and its output;
@@ -169,32 +169,32 @@ The plugin's folder is `PLUGIN_DATA`, the data folder Codex gives the plugin's h
 
 - `<session>.json`, the session's state:
   - `offset`, where in the rollout the first turn not yet done with begins;
-  - `sent`, the newest 500 run ids;
-  - `pending`, the runs Telmoni could not take yet, each with the Codex version it goes as and its conversation where content is on, the newest 200;
+  - `sent`, the newest 500 trace ids;
+  - `pending`, the traces Telmoni could not take yet, each under `trace` with the Codex version it goes as and its conversation where content is on, the newest 200; an entry of another shape is passed over;
   - `warned`, the once-a-session lines;
   - `destination`, an HMAC of the endpoint under the key, its first 16 hex digits.
 
-  It is written whole to `<session>.json.<pid>.tmp`, synced and renamed over the last, after each run sent or kept and at the end. A state that cannot be read is left as it is: the session sends nothing until it is fixed or moved aside, since read as new it would lose its kept runs.
-- `<session>.pending`, beside a state that still holds runs, made once, so the longest waiting goes first, and any hook finds them without reading every state.
+  It is written whole to `<session>.json.<pid>.tmp`, synced and renamed over the last, after each trace sent or kept and at the end. A state that cannot be read is left as it is: the session sends nothing until it is fixed or moved aside, since read as new it would lose its kept traces.
+- `<session>.pending`, beside a state that still holds traces, made once, so the longest waiting goes first, and any hook finds them without reading every state.
 - `<session>.lock`, the worker's while it works on the session (`shared/state.ts`'s `withLock`). It holds a token of the worker's own, and is freshened every 10 s; one not freshened for a minute was left by a worker that died. A stop's worker waits a minute for the lock, then logs that another hook holds the session and leaves its turns to the next.
-- `hook.log`, a line `<UTC time> <session> <text>` for each run sent, taken in part, refused or kept, each turn held, each once-a-session warning, each tag dropped and each fault. The worker's stderr goes there too. Past a mebibyte it is moved aside to `hook.log.1`.
+- `hook.log`, a line `<UTC time> <session> <text>` for each trace sent, taken in part, refused or kept, each turn held, each once-a-session warning, each tag dropped and each fault. The worker's stderr goes there too. Past a mebibyte it is moved aside to `hook.log.1`.
 
 Nothing of the session is logged: a session is named by the first 8 characters of its id, and a run by the first 8 of its.
 
 ## Delivery and failure
 
-`shared/send.ts`: a client a run, so the SDK's once-per-client warnings are the run's. Its queue has no bound, and a flush waits as long as the SDK's own attempts take. The verdict is read from each warning's kind, status and problem type, never its words:
+`shared/send.ts`: a client a trace, so the SDK's once-per-client warnings are the trace's. Its queue has no bound, and a flush waits as long as the SDK's own attempts take. The verdict is read from each warning's kind, status and problem type, never its words:
 
 - **Kept, sent again.** A network failure, a timed-out flush, or a refusal with a status that is not final, such as `401`, `403`, `404`, `429`, a `5xx` other than `500`, or a `500` for ingest's database.
-- **Refused for good**, logged and remembered as sent. A refusal at `400` or `413` for what the run holds, `402` for the organization's standing, or `500` for a fault of Telmoni's own; and a run the SDK itself refuses, which includes a kept run that no longer builds.
+- **Refused for good**, logged and remembered as sent. A refusal at `400` or `413` for what the trace holds, `402` for the organization's standing, or `500` for a fault of Telmoni's own; and a trace the SDK itself refuses, which includes a kept trace that no longer builds.
 - **Taken in part**, logged: a span or a field dropped.
 
-A session's kept runs go before its new ones, in order: a turn queues behind a kept run unsent.
+A session's kept traces go before its new ones, in order: a turn queues behind a kept trace unsent.
 
-A session that ends while it still holds runs has no next stop of its own. So the next stop of any session that holds none of its own sends what the others left, the longest waiting first:
+A session that ends while it still holds traces has no next stop of its own. So the next stop of any session that holds none of its own sends what the others left, the longest waiting first:
 
 - each under that session's lock, taken without waiting;
-- only where its `destination` is the same, so runs go nowhere their own key did not send them;
+- only where its `destination` is the same, so traces go nowhere their own key did not send them;
 - stopping at the first Telmoni still cannot take.
 
 Past 200 kept runs the oldest go, and the log says how many. A key or endpoint changed under a session drops what it kept for the old one, logged.
@@ -242,12 +242,12 @@ Each suite proves its module:
 - `transcript.test.ts`: each field read, the session's first line, tokens, each tool's kind and failure, a command the person ran passed over, a compaction's times, the kind of the error that ended a turn and why one was aborted, content only when asked, an offset and a line half written, and a pipe or a folder in the rollout's place;
 - `turns.test.ts`: how turns are cut, and when one is complete;
 - `names.test.ts`: models, efforts, providers and tools;
-- `record.test.ts`: a turn as a run, with its times, model calls, tokens, tools, failures, errors, compactions, outcomes and ids, and with content off and on;
+- `record.test.ts`: a turn as a trace, with its times, model calls, tokens, tools, failures, errors, compactions, outcomes and ids, and with content off and on;
 - `worker.test.ts`: the worker end to end, the SDK included. It covers:
   - delivery, once a turn;
   - waiting for the close Codex writes after the hook, holding a turn not closed, and the session's end;
   - where a session starts, and the offset it keeps;
-  - kept, refused and left runs;
+  - kept, refused and left traces;
   - the key, the key file, `CODEX_HOME` and the environment;
   - tags, and `PLUGIN_DATA`;
   - an unreadable state and a lock held;
@@ -296,11 +296,11 @@ Every other push ends green with nothing done, as does every push while the vers
 - A moved rollout format is not detected. It shows as runs with less in them, or turns held, until the reader catches up. The reader is written for Codex 0.167's.
 - A model call's start is where the rollout says it was handed its input, not when Codex sent the request.
 - A tool Codex writes no `item_completed` for (`update_plan`, `request_user_input`, `write_stdin`, a tool interrupted, an `exec_command` refused) is not recorded as a call: what the model asked of it is in its response's content alone.
-- A subagent works in a thread and a rollout of its own, which fires `SubagentStop`, not `Stop`, so its model calls and tools are not recorded: its parent's run holds the tool calls that started and waited on it. A multi-agent v2 subagent's activity (`SubAgentActivity`) is not read.
+- A subagent works in a thread and a rollout of its own, which fires `SubagentStop`, not `Stop`, so its model calls and tools are not recorded: its parent's trace holds the tool calls that started and waited on it. A multi-agent v2 subagent's activity (`SubAgentActivity`) is not read.
 - A command still running as its turn closed completes later under that turn's id, and is not recorded.
 - A `/review`'s turn, which Codex copies into the session without a close, is sent as cancelled once a later turn begins, where it holds a call.
 - An ephemeral session has no rollout, and is not recorded.
 - A turn closed after its `Stop`'s worker stopped waiting is sent at the next turn's end or the session's.
 - Lines written for a turn after it was sent are not recorded.
 - No image is sent, even with content on.
-- Kept runs are capped at 200 a session, the oldest dropped. A session's state file is never removed.
+- Kept traces are capped at 200 a session, the oldest dropped. A session's state file is never removed.

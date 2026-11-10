@@ -2,7 +2,7 @@
   "name": "codex-observability-plugin",
   "version": "0.0.0",
   "private": true,
-  "description": "Telmoni's Codex plugin: each turn of a Codex session recorded as a run, metadata unless you turn content on.",
+  "description": "Telmoni's Codex plugin: each turn of a Codex session recorded as a trace, metadata unless you turn content on.",
   "license": "Apache-2.0",
   "homepage": "https://telmoni.com/docs/api/coding-agents",
   "repository": {

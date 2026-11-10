@@ -1,11 +1,11 @@
 ---
 name: telmoni-observability
-description: Connects, tags and troubleshoots the Telmoni Observability plugin, which records each turn of these Codex sessions in Telmoni as a run. Use when the user asks to connect or set up Telmoni, to tag this repository's runs (for example with its repo and branch), to turn content capture or scrubbing on or off, or why their sessions are not showing up in Telmoni.
+description: Connects, tags and troubleshoots the Telmoni Observability plugin, which records each turn of these Codex sessions in Telmoni as a trace. Use when the user asks to connect or set up Telmoni, to tag this repository's traces (for example with its repo and branch), to turn content capture or scrubbing on or off, or why their sessions are not showing up in Telmoni.
 ---
 
 # Telmoni Observability
 
-The plugin records each turn of the user's Codex sessions in Telmoni as a run. A run holds:
+The plugin records each turn of the user's Codex sessions in Telmoni as a trace. A trace holds:
 
 - the model calls and their tokens;
 - the commands, edits and other tools Codex ran, by kind;
@@ -67,7 +67,7 @@ Tags label every run started in a folder. To tag the repository, write `.telmoni
 
 Tags apply from the next turn on. Offer to add `.telmoni-tags.json` to `.gitignore` if the user does not want it committed.
 
-## When runs are not showing up
+## When traces are not showing up
 
 Work through these in order:
 
@@ -80,15 +80,15 @@ Each log line names a session by the first 8 characters of its id:
 
 | Line | What it means |
 |---|---|
-| `sent <run>` | Delivered. The run is in Telmoni under the agent `codex`. |
+| `sent <trace>` | Delivered. The trace is in Telmoni under the agent `codex`. |
 | `no key` | Set the key (above). |
 | `key file not read: <why>` | Fix what it says. Often `chmod 600 ~/.codex/telmoni.json`, or JSON that does not parse. |
 | `endpoint refused: <why>` | The endpoint beside the key is not one the SDK sends to. |
-| `held <run>: its turn is not over yet` | Codex had not closed the turn 30 s after its end, as a long compaction can keep it. It is sent at the next turn's end, or when the session ends. |
-| `kept <run>, …` | Telmoni was out of reach, busy, or refused the key. The turn is sent again as the next turn ends. If the line names `401` or `403`, the key is wrong or lacks the ingest scope. |
-| `<run> taken in part: …` | Telmoni kept the run less a span or a field it names. |
-| `<run> refused, not sent again: …` | Telmoni refused the run for good, for what it holds or the organization's standing. |
-| `tag dropped: …` or `tags file not read: …` | A tag, or the tags file, broke a rule (above). The run was sent without it. |
+| `held <trace>: its turn is not over yet` | Codex had not closed the turn 30 s after its end, as a long compaction can keep it. It is sent at the next turn's end, or when the session ends. |
+| `kept <trace>, …` | Telmoni was out of reach, busy, or refused the key. The turn is sent again as the next turn ends. If the line names `401` or `403`, the key is wrong or lacks the ingest scope. |
+| `<trace> taken in part: …` | Telmoni kept the trace less a span or a field it names. |
+| `<trace> refused, not sent again: …` | Telmoni refused the trace for good, for what it holds or the organization's standing. |
+| `tag dropped: …` or `tags file not read: …` | A tag, or the tags file, broke a rule (above). The trace was sent without it. |
 | `state unreadable …` | The plugin's own file for the session is damaged. Moving it aside, out of the plugin's data folder, lets the session record again from its next turn. |
 
 No log at all means the hook never ran: go back to steps 1 to 3.

@@ -1,5 +1,5 @@
 /**
- * A turn as a run: its model calls with their tokens, its tool calls and its compactions, each with the times Codex
+ * A turn as a trace: its model calls with their tokens, its tool calls and its compactions, each with the times Codex
  * wrote, and with content on, the conversation as the GenAI conventions' messages.
  */
 
@@ -9,9 +9,9 @@ import type {
   CallRecord,
   ModelCallRecord,
   RecordOutcome,
-  RunRecord,
   StepRecord,
   ToolCallRecord,
+  TraceRecord,
 } from 'telmoni';
 
 import { effortOf, modelOf, providerOf } from './names.js';
@@ -33,7 +33,7 @@ export interface RecordOptions {
 
 const NAMESPACE_URL = '6ba7b811-9dad-11d1-80b4-00c04fd430c8';
 
-/** A version 5 UUID (RFC 9562) of `name` under `namespace`. */
+/** A version 5 UUID (RFC 9562) of `name` under `namespace`, as its 32 hex digits. */
 function uuid5(name: string, namespace: string): string {
   const digest = createHash('sha1')
     .update(Buffer.from(namespace.replaceAll('-', ''), 'hex'))
@@ -41,14 +41,13 @@ function uuid5(name: string, namespace: string): string {
     .digest();
   digest[6] = ((digest[6] ?? 0) & 0x0f) | 0x50;
   digest[8] = ((digest[8] ?? 0) & 0x3f) | 0x80;
-  const hex = digest.subarray(0, 16).toString('hex');
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  return digest.subarray(0, 16).toString('hex');
 }
 
 const NAMESPACE = uuid5('https://telmoni.com/codex-observability-plugin', NAMESPACE_URL);
 
-/** The run's id, the same however often its turn is built, so a turn sent twice is stored once. */
-export function runIdOf(sessionId: string, turnId: string): string {
+/** The trace's id, the same however often its turn is built, so a turn sent twice is stored once. */
+export function traceIdOf(sessionId: string, turnId: string): string {
   return uuid5(`${sessionId}:${turnId}`, NAMESPACE);
 }
 
@@ -58,8 +57,8 @@ function text(role: string, content: string | undefined): Message[] | undefined 
   return content === undefined ? undefined : [{ role, parts: [{ type: 'text', content }] }];
 }
 
-/** The run for `turn`, or undefined for a turn with no call in it or no time to place it at. */
-export function recordTurn(turn: Turn, options: RecordOptions): RunRecord | undefined {
+/** The trace for `turn`, or undefined for a turn with no call in it or no time to place it at. */
+export function recordTurn(turn: Turn, options: RecordOptions): TraceRecord | undefined {
   const known = turn.rows.map((row) => row.at).filter((at): at is number => at !== undefined);
   const start = turn.open.at ?? known[0];
   if (start === undefined) return undefined;
@@ -191,13 +190,13 @@ export function recordTurn(turn: Turn, options: RecordOptions): RunRecord | unde
     ...inside.flatMap((call) => [Number(call.start), Number(call.end)]),
   ].reduce((latest, at) => Math.max(latest, at), start);
 
-  const record: RunRecord = {
-    runId: runIdOf(options.sessionId, turn.id),
+  const record: TraceRecord = {
+    traceId: traceIdOf(options.sessionId, turn.id),
     agent: AGENT,
     sessionId: options.sessionId,
     start,
     end,
-    // Ordered by start, the run's own times holding every call.
+    // Ordered by start, the trace's own times holding every call.
     inside: inside.sort((a, b) => Number(a.start) - Number(b.start)),
     ...outcome(turn, options.sessionEnded),
   };
@@ -211,7 +210,7 @@ export function recordTurn(turn: Turn, options: RecordOptions): RunRecord | unde
 }
 
 /**
- * The run's outcome: failed by the kind of the error that ended it, or by the budget it ran out of; cancelled where it
+ * The trace's outcome: failed by the kind of the error that ended it, or by the budget it ran out of; cancelled where it
  * was stopped, replaced, or never closed before the session ended or another turn began.
  */
 function outcome(turn: Turn, sessionEnded: boolean): RecordOutcome {

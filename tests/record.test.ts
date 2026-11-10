@@ -1,7 +1,7 @@
-import type { ModelCallRecord, RunRecord, StepRecord, ToolCallRecord } from 'telmoni';
+import type { ModelCallRecord, StepRecord, ToolCallRecord, TraceRecord } from 'telmoni';
 import { describe, expect, it } from 'vitest';
 
-import { type RecordOptions, recordTurn, runIdOf } from '../src/record.js';
+import { type RecordOptions, recordTurn, traceIdOf } from '../src/record.js';
 import { type Row, readRollout } from '../src/transcript.js';
 import { type Turn, cut } from '../src/turns.js';
 import { Rollout, SECRETS, SESSION, assertMetadataOnly, makeHome } from './helpers.js';
@@ -15,36 +15,41 @@ const OPTIONS: RecordOptions = {
   content: false,
 };
 
-function record(rollout: Rollout, options: Partial<RecordOptions> = {}, index = -1): RunRecord {
+function record(rollout: Rollout, options: Partial<RecordOptions> = {}, index = -1): TraceRecord {
   const read = readRollout(rollout.path, { content: options.content ?? false, from: 0 });
   if ('problem' in read) throw new Error(read.problem);
   const turn = cut(read.rows).at(index);
   if (turn === undefined) throw new Error('no turn');
-  const run = recordTurn(turn, { ...OPTIONS, ...options });
-  if (run === undefined) throw new Error('no run');
-  return run;
+  const trace = recordTurn(turn, { ...OPTIONS, ...options });
+  if (trace === undefined) throw new Error('no trace');
+  return trace;
 }
 
-const models = (run: RunRecord) =>
-  (run.inside ?? []).filter((call): call is ModelCallRecord => call.type === 'model_call');
-const tools = (run: RunRecord) =>
-  (run.inside ?? []).filter((call): call is ToolCallRecord => call.type === 'tool_call');
+const models = (trace: TraceRecord) =>
+  (trace.inside ?? []).filter((call): call is ModelCallRecord => call.type === 'model_call');
+const tools = (trace: TraceRecord) =>
+  (trace.inside ?? []).filter((call): call is ToolCallRecord => call.type === 'tool_call');
 
-describe('a turn as a run', () => {
+describe('a turn as a trace', () => {
   it('of codex, in the session, from the turn’s start to its close, its id the same however often built', () => {
     const rollout = new Rollout(makeHome());
     const start = rollout.now;
     const turnId = rollout.turn(1);
-    const run = record(rollout);
-    expect(run).toMatchObject({
-      runId: runIdOf(SESSION, turnId),
+    const trace = record(rollout);
+    expect(trace).toMatchObject({
+      traceId: traceIdOf(SESSION, turnId),
       agent: 'codex',
       sessionId: SESSION,
     });
-    expect(run.start).toBe(start);
-    expect(run.end).toBe(rollout.now - 1000);
-    expect(record(rollout).runId).toBe(run.runId);
-    expect(runIdOf(SESSION, turnId)).not.toBe(runIdOf('another', turnId));
+    expect(trace.start).toBe(start);
+    expect(trace.end).toBe(rollout.now - 1000);
+    expect(record(rollout).traceId).toBe(trace.traceId);
+    expect(traceIdOf(SESSION, turnId)).not.toBe(traceIdOf('another', turnId));
+  });
+
+  it('names the trace by the version 5 UUID of the session and the turn, as 32 hex digits', () => {
+    // The bytes of 9dd2e394-d765-5078-8c85-e745d0b53b41, the id the turn had as a UUID, so a turn sent before keeps it.
+    expect(traceIdOf('session', 'turn')).toBe('9dd2e394d76550788c85e745d0b53b41');
   });
 
   it('a model call per response: its model, provider and effort, tokens as Codex counts them', () => {
@@ -110,35 +115,35 @@ describe('a turn as a run', () => {
     expect(calls[2]?.cancelled).toBe(true);
   });
 
-  it('every call ordered by its start, inside the run’s own times', () => {
-    const run = record(
+  it('every call ordered by its start, inside the trace’s own times', () => {
+    const trace = record(
       (() => {
         const rollout = new Rollout(makeHome());
         rollout.turn(3);
         return rollout;
       })(),
     );
-    const starts = (run.inside ?? []).map((call) => Number(call.start));
+    const starts = (trace.inside ?? []).map((call) => Number(call.start));
     expect(starts).toEqual([...starts].sort((a, b) => a - b));
-    for (const call of run.inside ?? []) {
-      expect(Number(call.start)).toBeGreaterThanOrEqual(Number(run.start));
-      expect(Number(call.end)).toBeLessThanOrEqual(Number(run.end));
+    for (const call of trace.inside ?? []) {
+      expect(Number(call.start)).toBeGreaterThanOrEqual(Number(trace.start));
+      expect(Number(call.end)).toBeLessThanOrEqual(Number(trace.end));
     }
   });
 
-  it('the error that ended a turn is its last model call, failed, and the run fails by its kind', () => {
+  it('the error that ended a turn is its last model call, failed, and the trace fails by its kind', () => {
     const rollout = new Rollout(makeHome());
     rollout.prompt();
     rollout.reply({ tool: true }).command().toolOutput();
     const handed = rollout.now - 1000;
     rollout.complete({ error: { response_too_many_failed_attempts: { http_status_code: 502 } } });
-    const run = record(rollout);
-    expect(models(run)).toHaveLength(2);
-    expect(models(run).at(-1)).toMatchObject({
+    const trace = record(rollout);
+    expect(models(trace)).toHaveLength(2);
+    expect(models(trace).at(-1)).toMatchObject({
       start: handed,
       errorType: 'response_too_many_failed_attempts',
     });
-    expect(run.errorType).toBe('response_too_many_failed_attempts');
+    expect(trace.errorType).toBe('response_too_many_failed_attempts');
   });
 
   it('a turn interrupted, replaced, or left open as the session ended or another began, is cancelled', () => {
@@ -170,8 +175,8 @@ describe('a turn as a run', () => {
     rollout.reply();
     const started = rollout.now;
     rollout.compact().reply().complete();
-    const run = record(rollout);
-    const steps = (run.inside ?? []).filter((call): call is StepRecord => call.type === 'step');
+    const trace = record(rollout);
+    const steps = (trace.inside ?? []).filter((call): call is StepRecord => call.type === 'step');
     expect(steps.map((step) => step.name)).toEqual(['compaction']);
     expect(steps[0]?.start).toBe(started);
     const summary = (steps[0]?.calls ?? []) as ModelCallRecord[];
@@ -179,7 +184,7 @@ describe('a turn as a run', () => {
     expect(summary[0]?.usage?.inputTokens).toBe(90000);
     expect(Number(summary[0]?.start)).toBeGreaterThanOrEqual(started);
     // The turn's own two responses, beside the step.
-    expect(models(run)).toHaveLength(2);
+    expect(models(trace)).toHaveLength(2);
   });
 
   it('a turn of any length: two hundred thousand tool calls', () => {
@@ -195,9 +200,9 @@ describe('a turn as a run', () => {
       })),
       followed: false,
     };
-    const run = recordTurn(turn, OPTIONS);
-    expect(run?.inside).toHaveLength(200_000);
-    expect(run?.end).toBe(2_000 + 200_000);
+    const trace = recordTurn(turn, OPTIONS);
+    expect(trace?.inside).toHaveLength(200_000);
+    expect(trace?.end).toBe(2_000 + 200_000);
   });
 
   it('a turn with no call in it is none', () => {
@@ -218,20 +223,20 @@ describe('content', () => {
     return rollout;
   };
 
-  it('off: nothing said in the run', () => {
-    const run = record(full());
-    assertMetadataOnly(JSON.stringify(run));
+  it('off: nothing said in the trace', () => {
+    const trace = record(full());
+    assertMetadataOnly(JSON.stringify(trace));
   });
 
   it('on: the prompt and last reply, what each model call was handed and said, each tool’s input and output', () => {
-    const run = record(full(), { content: true });
-    expect(run.inputMessages).toEqual([
+    const trace = record(full(), { content: true });
+    expect(trace.inputMessages).toEqual([
       { role: 'user', parts: [{ type: 'text', content: SECRETS.prompt }] },
     ]);
-    expect(run.outputMessages).toEqual([
+    expect(trace.outputMessages).toEqual([
       { role: 'assistant', parts: [{ type: 'text', content: SECRETS.lastReply }] },
     ]);
-    const [first, second] = models(run);
+    const [first, second] = models(trace);
     expect(first?.inputMessages).toEqual([
       { role: 'user', parts: [{ type: 'text', content: SECRETS.prompt }] },
     ]);
@@ -240,10 +245,10 @@ describe('content', () => {
     expect(second?.inputMessages).toEqual([
       { role: 'tool', parts: [{ type: 'tool_call_response', response: SECRETS.output }] },
     ]);
-    const [command, edit] = tools(run);
+    const [command, edit] = tools(trace);
     expect(JSON.stringify(command?.arguments)).toContain(SECRETS.command);
     expect(command?.result).toBe(SECRETS.output);
     expect(JSON.stringify(edit?.arguments)).toContain(SECRETS.diff);
-    expect(JSON.stringify(run)).not.toContain(SECRETS.instructions);
+    expect(JSON.stringify(trace)).not.toContain(SECRETS.instructions);
   });
 });

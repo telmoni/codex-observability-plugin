@@ -62,7 +62,7 @@ export type Row = Line &
 
 /** The session as the rollout's first line names it. */
 export interface Session {
-  /** Codex's version, sent as the run's release. */
+  /** Codex's version, sent as the trace's release. */
   cliVersion?: string;
   /** The provider of the session's models, as Codex ids it (`openai`, `azure`). */
   provider?: string;
