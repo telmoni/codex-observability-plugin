@@ -78,7 +78,7 @@ Of each line the plugin reads its `timestamp`, to the millisecond, and the turn 
 - `event_msg` `task_started`: a turn's opening;
 - `turn_context`: the turn's `model` and `effort`;
 - `event_msg` `thread_settings_applied`: the session's `model`, `model_provider_id` and `reasoning_effort`, for a turn whose context names none;
-- `token_usage_record`: a model response's `usage`, `input_tokens`, `cached_input_tokens`, `cache_write_input_tokens` and `output_tokens`;
+- `token_usage_record`: a model response's `usage`, `input_tokens`, `cached_input_tokens`, `cache_write_input_tokens`, `output_tokens` and `reasoning_output_tokens`, the last a subset of output, omitted where unreported;
 - `event_msg` `item_completed`, the item's `type`, `status`, `started_at_ms` and `completed_at_ms`:
   - a `CommandExecution`, its `exit_code`, and its `source`, to pass over a command the person ran (`user_shell`);
   - a `FileChange`; an `McpToolCall`, its `server`, `tool` and whether it has an `error`; a `DynamicToolCall`, its `tool` and `success`; a `CollabAgentToolCall`, its `tool`; a `WebSearch`; an `ImageView`; an `ImageGeneration`; an `Extension`, its `kind` and whether it has a `failure`;

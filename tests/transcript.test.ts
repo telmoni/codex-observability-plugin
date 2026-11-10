@@ -56,7 +56,7 @@ describe('the rollout', () => {
     });
     const usage = read(rollout).rows.find((row) => row.kind === 'usage');
     expect(usage).toMatchObject({
-      tokens: { input: 900, cacheRead: 600, cacheWrite: 100, output: 50 },
+      tokens: { input: 900, cacheRead: 600, cacheWrite: 100, output: 50, reasoning: 20 },
     });
   });
 

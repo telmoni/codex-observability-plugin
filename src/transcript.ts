@@ -13,6 +13,7 @@ export interface Tokens {
   cacheRead?: number;
   cacheWrite?: number;
   output?: number;
+  reasoning?: number;
 }
 
 /** A tool call, of the `item_completed` Codex writes for one. */
@@ -432,6 +433,8 @@ function tokensOf(given: unknown): Tokens | undefined {
   if (cacheWrite !== undefined) tokens.cacheWrite = cacheWrite;
   const output = count(usage.output_tokens);
   if (output !== undefined) tokens.output = output;
+  const reasoning = count(usage.reasoning_output_tokens);
+  if (reasoning !== undefined) tokens.reasoning = reasoning;
   return Object.keys(tokens).length > 0 ? tokens : undefined;
 }
 

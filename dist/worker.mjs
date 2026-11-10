@@ -1455,6 +1455,7 @@ function recordTurn(turn, options) {
       if (tokens.output !== void 0) call.usage.outputTokens = tokens.output;
       if (tokens.cacheRead !== void 0) call.usage.cacheReadInputTokens = tokens.cacheRead;
       if (tokens.cacheWrite !== void 0) call.usage.cacheWriteInputTokens = tokens.cacheWrite;
+      if (tokens.reasoning !== void 0) call.usage.reasoningOutputTokens = tokens.reasoning;
     }
     return call;
   };
@@ -3124,8 +3125,9 @@ var PROMPT_VERSION = "gen_ai.prompt.version";
 var TIME_TO_FIRST_CHUNK = "gen_ai.response.time_to_first_chunk";
 var INPUT_TOKENS = "gen_ai.usage.input_tokens";
 var OUTPUT_TOKENS = "gen_ai.usage.output_tokens";
+var REASONING_OUTPUT_TOKENS = "gen_ai.usage.reasoning.output_tokens";
 var CACHE_READ_INPUT_TOKENS = "gen_ai.usage.cache_read.input_tokens";
-var CACHE_WRITE_INPUT_TOKENS = "gen_ai.usage.cache_write.input_tokens";
+var CACHE_CREATION_INPUT_TOKENS = "gen_ai.usage.cache_creation.input_tokens";
 var COST = "gen_ai.usage.cost";
 var SESSION_ID = "gen_ai.conversation.id";
 var DATA_SOURCE_ID = "gen_ai.data_source.id";
@@ -3723,8 +3725,9 @@ var SCORE_KEYS = /* @__PURE__ */ new Set([
 var INTEGERS = /* @__PURE__ */ new Set([
   INPUT_TOKENS,
   OUTPUT_TOKENS,
+  REASONING_OUTPUT_TOKENS,
   CACHE_READ_INPUT_TOKENS,
-  CACHE_WRITE_INPUT_TOKENS,
+  CACHE_CREATION_INPUT_TOKENS,
   RETRIEVAL_TOP_K
 ]);
 var fetchTransport = async (url, init) => {
@@ -6242,7 +6245,7 @@ var ModelCall = class extends Handle {
       input: count2(INPUT_TOKENS),
       output: count2(OUTPUT_TOKENS),
       cacheRead: count2(CACHE_READ_INPUT_TOKENS),
-      cacheWrite: count2(CACHE_WRITE_INPUT_TOKENS)
+      cacheWrite: count2(CACHE_CREATION_INPUT_TOKENS)
     };
     const reported = held[COST];
     let cost = typeof reported === "number" ? reported : priced(this.#prices, this.#provider, this.#model, tokens);
@@ -6703,6 +6706,7 @@ var USAGE_KEYS = [
   "outputTokens",
   "cacheReadInputTokens",
   "cacheWriteInputTokens",
+  "reasoningOutputTokens",
   "cost"
 ];
 function usageOf(usage, warnOnce) {
@@ -6721,7 +6725,8 @@ function usageOf(usage, warnOnce) {
     [INPUT_TOKENS, usage.inputTokens],
     [OUTPUT_TOKENS, usage.outputTokens],
     [CACHE_READ_INPUT_TOKENS, usage.cacheReadInputTokens],
-    [CACHE_WRITE_INPUT_TOKENS, usage.cacheWriteInputTokens]
+    [CACHE_CREATION_INPUT_TOKENS, usage.cacheWriteInputTokens],
+    [REASONING_OUTPUT_TOKENS, usage.reasoningOutputTokens]
   ]) {
     if (!isSet(value)) continue;
     const count2 = whole(value, 0, 2 ** 63);
@@ -7692,6 +7697,8 @@ function tokensOf(given) {
   if (cacheWrite !== void 0) tokens.cacheWrite = cacheWrite;
   const output = count(usage.output_tokens);
   if (output !== void 0) tokens.output = output;
+  const reasoning = count(usage.reasoning_output_tokens);
+  if (reasoning !== void 0) tokens.reasoning = reasoning;
   return Object.keys(tokens).length > 0 ? tokens : void 0;
 }
 function object(given) {

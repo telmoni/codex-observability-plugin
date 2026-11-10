@@ -1,3 +1,4 @@
+import { readFileSync, writeFileSync } from 'node:fs';
 import type { ModelCallRecord, StepRecord, ToolCallRecord, TraceRecord } from 'telmoni';
 import { describe, expect, it } from 'vitest';
 
@@ -55,7 +56,9 @@ describe('a turn as a trace', () => {
   it('a model call per response: its model, provider and effort, tokens as Codex counts them', () => {
     const rollout = new Rollout(makeHome());
     rollout.prompt();
-    rollout.reply({ tokens: { input: 900, cached: 600, cacheWrite: 100, output: 50 } }).complete();
+    rollout
+      .reply({ tokens: { input: 900, cached: 600, cacheWrite: 100, output: 50, reasoning: 20 } })
+      .complete();
     const [call] = models(record(rollout));
     expect(call).toMatchObject({
       model: 'gpt-6-sol',
@@ -66,8 +69,22 @@ describe('a turn as a trace', () => {
         outputTokens: 50,
         cacheReadInputTokens: 600,
         cacheWriteInputTokens: 100,
+        reasoningOutputTokens: 20,
       },
     });
+  });
+
+  it('leaves reasoning absent where the rollout reports none', () => {
+    const rollout = new Rollout(makeHome());
+    rollout.prompt();
+    rollout.reply({ tokens: { input: 10, output: 5 } }).complete();
+    // The helper writes explicit zeros; older rollouts omit this field.
+    writeFileSync(
+      rollout.path,
+      readFileSync(rollout.path, 'utf8').replaceAll('"reasoning_output_tokens":0,', ''),
+    );
+    const [call] = models(record(rollout));
+    expect(call?.usage).not.toHaveProperty('reasoningOutputTokens');
   });
 
   it('a model call runs from what it was handed, the prompt or the tools’ output, to its tokens’ record', () => {

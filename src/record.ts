@@ -82,6 +82,7 @@ export function recordTurn(turn: Turn, options: RecordOptions): TraceRecord | un
       if (tokens.output !== undefined) call.usage.outputTokens = tokens.output;
       if (tokens.cacheRead !== undefined) call.usage.cacheReadInputTokens = tokens.cacheRead;
       if (tokens.cacheWrite !== undefined) call.usage.cacheWriteInputTokens = tokens.cacheWrite;
+      if (tokens.reasoning !== undefined) call.usage.reasoningOutputTokens = tokens.reasoning;
     }
     return call;
   };
