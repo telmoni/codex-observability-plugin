@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 import { traceIdOf } from '../src/record.js';
 import {
+  ENDPOINT,
   FakeTelmoni,
   KEY,
   Rollout,
@@ -23,6 +24,8 @@ import {
   stateOf,
   writeKeyFile,
 } from './helpers.js';
+
+const ENV = { TELMONI_API_KEY: KEY, TELMONI_ENDPOINT: ENDPOINT };
 
 const names = (telmoni: FakeTelmoni, traceId: string): string[] =>
   (telmoni.traces().get(traceId) ?? []).map((span) => span.name);
@@ -165,7 +168,7 @@ describe('the key', () => {
   it('from the key file, where the environment names none', async () => {
     const home = makeHome();
     const telmoni = new FakeTelmoni();
-    writeKeyFile(home, { apiKey: KEY });
+    writeKeyFile(home, { apiKey: KEY, endpoint: ENDPOINT });
     const rollout = new Rollout(home);
     rollout.turn(0);
     await runWorker(rollout.stop(), home, telmoni, {});
@@ -182,6 +185,18 @@ describe('the key', () => {
     await runWorker(rollout.stop(), home, telmoni, {});
     expect(telmoni.requests).toHaveLength(0);
     expect(logOf(home).match(/no key/g)).toHaveLength(1);
+  });
+
+  it('without an endpoint: said once, nothing sent', async () => {
+    const home = makeHome();
+    const telmoni = new FakeTelmoni();
+    const rollout = new Rollout(home);
+    rollout.turn(0);
+    await runWorker(rollout.stop(), home, telmoni, { TELMONI_API_KEY: KEY });
+    rollout.turn(0);
+    await runWorker(rollout.stop(), home, telmoni, { TELMONI_API_KEY: KEY });
+    expect(telmoni.requests).toHaveLength(0);
+    expect(logOf(home).match(/no endpoint/g)).toHaveLength(1);
   });
 });
 
@@ -206,7 +221,7 @@ describe('the plugin’s folder', () => {
     mkdirSync(data, { recursive: true });
     const rollout = new Rollout(home);
     rollout.turn(0);
-    await runWorker(rollout.stop(), home, telmoni, { TELMONI_API_KEY: KEY, PLUGIN_DATA: data });
+    await runWorker(rollout.stop(), home, telmoni, { ...ENV, PLUGIN_DATA: data });
     expect(keptText(home)).toBe('');
     expect(pluginDir(home)).not.toBe(data);
   });
@@ -226,7 +241,7 @@ describe('content', () => {
       const rollout = new Rollout(home);
       rollout.turn(1);
       await runWorker(rollout.stop(), home, telmoni, {
-        TELMONI_API_KEY: KEY,
+        ...ENV,
         TELMONI_CAPTURE_CONTENT: '1',
       });
       expect(telmoni.text().includes(SECRETS.prompt), `content mode ${mode}`).toBe(sent);
@@ -320,7 +335,10 @@ describe('delivery', () => {
     // Another key's kept turns go nowhere they were not meant to.
     const elsewhere = new Rollout(home, '019a6f2e-5c00-7d2a-9b1e-4f0c3a2b1d12');
     elsewhere.turn(0);
-    await runWorker(elsewhere.stop(), home, telmoni, { TELMONI_API_KEY: 'tm_another_key' });
+    await runWorker(elsewhere.stop(), home, telmoni, {
+      ...ENV,
+      TELMONI_API_KEY: 'tm_another_key',
+    });
     telmoni.offline = false;
 
     const rollout = new Rollout(home);
@@ -338,11 +356,11 @@ describe('the key file', () => {
   it('is read while it is the person’s own and shut to everyone else, with its endpoint', async () => {
     const home = makeHome();
     const telmoni = new FakeTelmoni();
-    writeKeyFile(home, { apiKey: KEY, endpoint: 'https://telmoni.example.com' });
+    writeKeyFile(home, { apiKey: KEY, endpoint: 'https://file.example.com' });
     const rollout = new Rollout(home);
     rollout.turn(0);
     await runWorker(rollout.stop(), home, telmoni, {});
-    expect(telmoni.requests[0]?.url).toMatch(/^https:\/\/telmoni\.example\.com\//);
+    expect(telmoni.requests[0]?.url).toMatch(/^https:\/\/file\.example\.com\//);
     expect(telmoni.requests[0]?.headers.Authorization).toBe(`Bearer ${KEY}`);
   });
 
@@ -351,9 +369,13 @@ describe('the key file', () => {
     const telmoni = new FakeTelmoni();
     const codexHome = join(home, 'elsewhere');
     mkdirSync(codexHome);
-    writeFileSync(join(codexHome, 'telmoni.json'), JSON.stringify({ apiKey: KEY }), {
-      mode: 0o600,
-    });
+    writeFileSync(
+      join(codexHome, 'telmoni.json'),
+      JSON.stringify({ apiKey: KEY, endpoint: ENDPOINT }),
+      {
+        mode: 0o600,
+      },
+    );
     const rollout = new Rollout(home);
     rollout.turn(0);
     await runWorker(rollout.stop(), home, telmoni, { CODEX_HOME: codexHome });
@@ -381,7 +403,7 @@ describe('the key file', () => {
     const rollout = new Rollout(home);
     rollout.turn(0);
     await runWorker(rollout.stop(), home, telmoni);
-    expect(telmoni.requests[0]?.url).toMatch(/^https:\/\/api\.telmoni\.com\//);
+    expect(telmoni.requests[0]?.url).toMatch(/^https:\/\/telmoni\.example\.com\//);
     expect(telmoni.requests[0]?.headers.Authorization).toBe(`Bearer ${KEY}`);
   });
 });

@@ -5,9 +5,9 @@
   "author": {
     "name": "Telmoni",
     "email": "hello@telmoni.com",
-    "url": "https://telmoni.com"
+    "url": "https://github.com/telmoni/telmoni"
   },
-  "homepage": "https://telmoni.com/docs/api/coding-agents",
+  "homepage": "https://github.com/telmoni/codex-observability-plugin",
   "repository": "https://github.com/telmoni/codex-observability-plugin",
   "license": "Apache-2.0",
   "keywords": ["observability", "monitoring", "telemetry", "tracing"],
@@ -18,7 +18,7 @@
     "longDescription": "Records each turn of your Codex sessions in Telmoni as a trace: the models it called and their tokens, the commands, edits and other tools it ran, each with its times and whether it failed, and the tags you set. The conversation itself only once you turn on content and the project keeps content. Telmoni is privacy-first, open-source monitoring for AI agents.",
     "developerName": "Telmoni",
     "category": "Developer Tools",
-    "websiteURL": "https://telmoni.com",
+    "websiteURL": "https://github.com/telmoni/telmoni",
     "defaultPrompt": [
       "Help me connect Telmoni to record my Codex sessions",
       "Tag this repository's Telmoni traces with its repo and branch",

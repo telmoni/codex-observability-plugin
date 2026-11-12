@@ -26,18 +26,18 @@ The user sets the key from their own terminal; tell them how (below).
 
 Three things, all the user's to do:
 
-1. **A key.** A Telmoni project API key that holds the **ingest** scope (https://telmoni.com/docs/api/api-keys).
-2. **The key file**, readable by them alone. Have them run this in their own terminal, then type `{"apiKey": "tm_…"}`, press Enter, then Ctrl-D:
+1. **A key and an endpoint.** A Telmoni project API key that holds the **ingest** scope (https://github.com/telmoni/telmoni/blob/main/web/content/docs/api/api-keys.mdx), and the machine host of their self-hosted Telmoni. There is no default endpoint: without one nothing is sent.
+2. **The key file**, readable by them alone. Have them run this in their own terminal, then type `{"apiKey": "tm_…", "endpoint": "<its machine host>"}`, press Enter, then Ctrl-D:
 
    ```sh
    (umask 077 && cat > ~/.codex/telmoni.json) && chmod 600 ~/.codex/telmoni.json
    ```
 
    - The key never reaches their shell history.
-   - For a self-hosted Telmoni, they add `"endpoint": "<its machine host>"` beside the key.
+   - The endpoint is their self-hosted Telmoni's machine host, such as `https://telmoni.example.com`.
    - Where they set `CODEX_HOME`, the file goes in that folder instead of `~/.codex`.
 
-   A `TELMONI_API_KEY` line in `~/.codex/.env`, which Codex loads as it starts, works too, with `TELMONI_ENDPOINT` beside it for a self-hosted Telmoni. A key there wins over the file. One exported in their shell may not reach an interactive session, which Codex runs in a background service that keeps the environment it first started with.
+   A `TELMONI_API_KEY` line in `~/.codex/.env`, which Codex loads as it starts, works too, with `TELMONI_ENDPOINT` beside it. A key there wins over the file. One exported in their shell may not reach an interactive session, which Codex runs in a background service that keeps the environment it first started with.
 3. **Trust the hooks.** Codex runs no plugin's hooks until the user trusts them: in Codex, `/hooks`, then trust the plugin's `Stop` and `SessionEnd` hooks. An update to the plugin asks for that trust again.
 
 The key file is read as each turn ends. Turns that ended before the key was set are never sent: recording starts with the next turn to end.
@@ -82,6 +82,7 @@ Each log line names a session by the first 8 characters of its id:
 |---|---|
 | `sent <trace>` | Delivered. The trace is in Telmoni under the agent `codex`. |
 | `no key` | Set the key (above). |
+| `no endpoint: …` | Set the endpoint beside the key (above). |
 | `key file not read: <why>` | Fix what it says. Often `chmod 600 ~/.codex/telmoni.json`, or JSON that does not parse. |
 | `endpoint refused: <why>` | The endpoint beside the key is not one the SDK sends to. |
 | `held <trace>: its turn is not over yet` | Codex had not closed the turn 30 s after its end, as a long compaction can keep it. It is sent at the next turn's end, or when the session ends. |

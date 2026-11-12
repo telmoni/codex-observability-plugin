@@ -28,6 +28,7 @@ import { type WorkOptions, work } from '../src/worker.js';
 
 export const SESSION = '019a6f2e-5c00-7d2a-9b1e-4f0c3a2b1d10';
 export const KEY = 'tm_test_0123456789abcdef';
+export const ENDPOINT = 'https://telmoni.example.com';
 /** The session's start: the clock moves a second a line unless told otherwise. */
 export const T0 = Date.parse('2026-11-06T22:00:00.000Z');
 
@@ -653,7 +654,7 @@ export async function runWorker(
   stop: Stop,
   home: string,
   telmoni: FakeTelmoni,
-  env: Record<string, string> = { TELMONI_API_KEY: KEY },
+  env: Record<string, string> = { TELMONI_API_KEY: KEY, TELMONI_ENDPOINT: ENDPOINT },
   extra: Partial<WorkOptions> = {},
 ): Promise<void> {
   await work(stop, {

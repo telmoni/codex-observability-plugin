@@ -161,7 +161,7 @@ The worker reads the settings at every hook (`shared/settings.ts`).
   - A field there but empty, or a switch neither `true` nor `false`, has the whole file passed over, logged once a session, and nothing is sent.
 - **Pairing.** A key never goes to an endpoint, nor takes a switch, named anywhere but beside it.
 - **Where it lives.** Codex gives a plugin's hooks no settings, so the file sits in Codex's own folder, beside its `auth.json`, out of every repository.
-- **The endpoint.** The SDK's `Config` checks it. One it refuses is logged once a session, in the SDK's words, which name at most the host, and the turns wait for it to be fixed.
+- **The endpoint.** A self-hosted Telmoni's machine host, beside the key. There is no default: without one, as without a key, the worker logs once a session that there is none (`worker.ts`), and sends nothing; the bundled SDK's own default is never reached. The SDK's `Config` checks it. One it refuses is logged once a session, in the SDK's words, which name at most the host, and the turns wait for it to be fixed.
 
 ## State and the log
 
